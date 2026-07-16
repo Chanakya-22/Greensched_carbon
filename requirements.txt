@@ -1,0 +1,10 @@
+torch
+torchvision
+open_clip_torch
+transformers
+faiss-cpu
+simpy
+pandas
+matplotlib
+requests
+python-dotenv

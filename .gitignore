@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+
+.env
+.env.*
+venv/
+.venv/
+env/
+
+# Raw trace data
+data/carbon_traces/*.csv
+data/price_traces/*.csv
+
+# Local planning artifacts
+phase_plan/
+phase_plan.md
+
+# IDE and tooling
+.vscode/
+.pytest_cache/
+.mypy_cache/
