@@ -1,0 +1,5 @@
+Policy,Total Cost ($),Total Carbon (g CO2),Deadline Success Rate (%),Avg Completion Time (hrs)
+FIFO OnDemand,335.95,12558,93.3,91.6
+Cheapest First,192.03,39586,93.3,91.6
+Cleanest First,335.95,12558,93.3,91.6
+Joint Policy,270.13,23139,93.3,91.6

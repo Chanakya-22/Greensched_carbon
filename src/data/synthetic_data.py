@@ -116,28 +116,31 @@ if __name__ == "__main__":
     # Set random seed for reproducibility
     np.random.seed(42)
     
-    # Define three regions with clearly different profiles
+    # Define three regions with REAL TRADEOFFS (not one dominates all)
+    # Region 1: Clean but Expensive (green energy, premium pricing)
+    # Region 2: Cheap but Dirty (coal/fossil heavy, cheap due to abundance)
+    # Region 3: Balanced (moderate on both cost and emissions)
     regions = [
         {
-            "name": "region-clean-night",
-            "carbon_base": 200,      # Cleaner baseline
-            "carbon_amplitude": 100,  # Moderate variation
-            "price_cpu_base": 0.03,
-            "price_gpu_base": 0.4,
+            "name": "region-green-premium",
+            "carbon_base": 100,      # Very clean (renewable-heavy)
+            "carbon_amplitude": 50,   # Small variation
+            "price_cpu_base": 0.12,   # Premium pricing
+            "price_gpu_base": 1.2,
         },
         {
-            "name": "region-volatile",
-            "carbon_base": 350,      # Higher baseline
-            "carbon_amplitude": 200,  # High variation (very dirty evenings)
-            "price_cpu_base": 0.08,
-            "price_gpu_base": 0.9,
+            "name": "region-cheap-dirty",
+            "carbon_base": 400,      # Very dirty (coal-heavy)
+            "carbon_amplitude": 150,  # Higher variation
+            "price_cpu_base": 0.02,   # Very cheap
+            "price_gpu_base": 0.3,
         },
         {
-            "name": "region-midrange",
-            "carbon_base": 280,      # Middle baseline
-            "carbon_amplitude": 120,  # Medium variation
-            "price_cpu_base": 0.05,
-            "price_gpu_base": 0.6,
+            "name": "region-balanced",
+            "carbon_base": 250,      # Middle baseline
+            "carbon_amplitude": 120,  # Moderate variation
+            "price_cpu_base": 0.06,   # Middle price
+            "price_gpu_base": 0.65,
         },
     ]
     
