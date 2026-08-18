@@ -163,7 +163,7 @@ def run_comparison():
     bars = ax.bar(policy_names, deadline_rates, color=colors, alpha=0.7, edgecolor="black", linewidth=1.5)
     ax.set_ylabel("Deadline Success Rate (%)", fontweight="bold")
     ax.set_title("Deadline Success Rate by Policy", fontweight="bold")
-    ax.set_ylim([95, 100.5])
+    ax.set_ylim([max(0, min(deadline_rates) - 5), 105])
     ax.grid(axis="y", alpha=0.3)
     for i, (bar, rate) in enumerate(zip(bars, deadline_rates)):
         ax.text(bar.get_x() + bar.get_width()/2, rate + 0.1, f"{rate:.1f}%", 
@@ -206,7 +206,7 @@ def run_comparison():
           f"({100*(fifo_cost-results['Joint Policy']['total_cost'])/fifo_cost:.1f}% savings vs FIFO)")
     print(f"✓ Joint Policy carbon: {results['Joint Policy']['total_carbon']:.0f}g CO2 " +
           f"({100*(fifo_carbon-results['Joint Policy']['total_carbon'])/fifo_carbon:.1f}% reduction vs FIFO)")
-    print(f"✓ All policies achieved 100% deadline success rate")
+    print(f"✓ Deadline success rates: " + ", ".join(f"{p}: {r['deadline_success_rate']:.1f}%" for p, r in results.items()))
     print(f"\n✓ Results saved to:")
     print(f"  - {csv_path}")
     print(f"  - {png_path}")
