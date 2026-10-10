@@ -2,7 +2,7 @@
 Job model and generator for the GreenSched simulator.
 """
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 import random
 import pandas as pd
 
@@ -27,7 +27,8 @@ class JobGenerator:
         window_hours: int,
         cpu_ratio: float = 0.5,
         min_slack_hours: float = 2,
-        max_slack_hours: float = 12
+        max_slack_hours: float = 12,
+        seed: Optional[int] = None,
     ) -> List[Job]:
         """
         Generate a randomized but realistic list of Job objects.
@@ -38,29 +39,31 @@ class JobGenerator:
             cpu_ratio: Fraction of jobs that are CPU (vs GPU) jobs
             min_slack_hours: Minimum slack between (arrival + duration) and deadline
             max_slack_hours: Maximum slack between (arrival + duration) and deadline
+            seed: Optional random seed for reproducible job generation
             
         Returns:
             List of Job objects sorted by arrival_time
         """
+        rng = random.Random(seed) if seed is not None else random
         jobs = []
         
         for i in range(num_jobs):
             # Randomly determine job type
-            job_type = "cpu_openmp" if random.random() < cpu_ratio else "gpu_cuda"
+            job_type = "cpu_openmp" if rng.random() < cpu_ratio else "gpu_cuda"
             
-            # Arrival time spread across window
-            arrival_time = random.uniform(0, window_hours)
+            # Traces are hourly, so submissions are aligned to whole hours.
+            arrival_time = rng.randint(0, window_hours - 1)
             
             # Duration varies by type
             if job_type == "cpu_openmp":
-                duration_estimate = random.uniform(0.5, 8)  # 30 min to 8 hours
-                resource_requirement = random.randint(1, 16)  # 1-16 CPU cores
+                duration_estimate = rng.uniform(0.5, 8)  # 30 min to 8 hours
+                resource_requirement = rng.randint(1, 16)  # 1-16 CPU cores
             else:  # gpu_cuda
-                duration_estimate = random.uniform(1, 24)  # 1 to 24 hours
-                resource_requirement = random.randint(1, 4)  # 1-4 GPUs
+                duration_estimate = rng.uniform(1, 24)  # 1 to 24 hours
+                resource_requirement = rng.randint(1, 4)  # 1-4 GPUs
             
             # Slack hours between (arrival + duration) and deadline
-            slack = random.uniform(min_slack_hours, max_slack_hours)
+            slack = rng.uniform(min_slack_hours, max_slack_hours)
             deadline = arrival_time + duration_estimate + slack
             
             job = Job(

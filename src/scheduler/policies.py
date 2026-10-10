@@ -5,19 +5,20 @@ Each policy implements a different optimization strategy.
 from typing import List, Dict, Union
 
 
+DEFAULT_REGION = "region-balanced"
+
+
 def fifo_ondemand_policy(
     job,
     current_hour: int,
     region_options: List[Dict]
 ) -> Union[Dict, str]:
     """
-    FIFO OnDemand Policy (Baseline - No Intelligence)
+    Model an organisation that always deploys to its home region regardless
+    of price or carbon.
     
-    Immediately picks the first region in region_options, ignoring both
-    price and carbon considerations. This is a naive baseline that serves
-    as a point of comparison.
-    
-    Optimization target: None (no optimization)
+    The default home region is selected when available; otherwise the first
+    available region is used.
     
     Args:
         job: Job object with job_id, job_type, arrival_time, deadline, etc.
@@ -25,10 +26,18 @@ def fifo_ondemand_policy(
         region_options: List of dicts with region, carbon_intensity, price_per_hr
         
     Returns:
-        First region dict in options, or "wait" if no options available
+        Home region dict if available, otherwise the first option, or "wait"
+        if no options are available
     """
     if region_options:
-        return region_options[0]
+        return next(
+            (
+                region
+                for region in region_options
+                if region["region"] == DEFAULT_REGION
+            ),
+            region_options[0],
+        )
     return "wait"
 
 

@@ -2,6 +2,7 @@
 Synthetic data generator for carbon intensity and spot prices.
 Generates realistic multi-region traces with daily patterns and random variations.
 """
+import argparse
 import os
 import numpy as np
 import pandas as pd
@@ -9,7 +10,34 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 
 
-def generate_region_traces(regions: List[Dict], hours: int = 168) -> tuple:
+DEFAULT_REGIONS = [
+    {
+        "name": "region-green-premium",
+        "carbon_base": 100,
+        "carbon_amplitude": 50,
+        "price_cpu_base": 0.12,
+        "price_gpu_base": 1.2,
+    },
+    {
+        "name": "region-cheap-dirty",
+        "carbon_base": 400,
+        "carbon_amplitude": 150,
+        "price_cpu_base": 0.02,
+        "price_gpu_base": 0.3,
+    },
+    {
+        "name": "region-balanced",
+        "carbon_base": 250,
+        "carbon_amplitude": 120,
+        "price_cpu_base": 0.06,
+        "price_gpu_base": 0.65,
+    },
+]
+
+
+def generate_region_traces(
+    regions: List[Dict], hours: int = 168, seed: int = 42
+) -> tuple:
     """
     Generate hourly carbon intensity and spot price traces for multiple regions.
     
@@ -23,10 +51,12 @@ def generate_region_traces(regions: List[Dict], hours: int = 168) -> tuple:
                 "price_gpu_base": 0.6,  # $/hr baseline for GPU
             }
         hours: Number of hourly measurements to generate (default 1 week = 168)
+        seed: Seed for the random number generator (default 42)
         
     Returns:
         Tuple of (combined_df, carbon_df, price_df)
     """
+    rng = np.random.default_rng(seed)
     all_rows = []
     
     # Start time
@@ -47,7 +77,7 @@ def generate_region_traces(regions: List[Dict], hours: int = 168) -> tuple:
             # Carbon intensity: daily cosine pattern (low 3-5am, high 6-9pm)
             # Shifted so minimum is around hour 4 (4am)
             carbon_cycle = -np.cos((hour_of_day - 4) * 2 * np.pi / 24)
-            carbon_noise = np.random.uniform(-0.08, 0.08)  # +/- 8% noise
+            carbon_noise = rng.uniform(-0.08, 0.08)  # +/- 8% noise
             carbon_intensity = carbon_base + carbon_amplitude * carbon_cycle
             carbon_intensity *= (1 + carbon_noise)
             carbon_intensity = max(0, carbon_intensity)  # Keep non-negative
@@ -57,8 +87,8 @@ def generate_region_traces(regions: List[Dict], hours: int = 168) -> tuple:
             price_cpu = price_cpu_base + price_cpu_cycle
             
             # 5% chance of price spike (demand surge): 1.5x to 2.5x multiplier
-            if np.random.random() < 0.05:
-                spike_multiplier = np.random.uniform(1.5, 2.5)
+            if rng.random() < 0.05:
+                spike_multiplier = rng.uniform(1.5, 2.5)
                 price_cpu *= spike_multiplier
             
             price_cpu = max(0.01, price_cpu)  # Keep positive
@@ -67,8 +97,8 @@ def generate_region_traces(regions: List[Dict], hours: int = 168) -> tuple:
             price_gpu_cycle = -np.cos((hour_of_day - 4) * 2 * np.pi / 24) * 1.8
             price_gpu = price_gpu_base + price_gpu_cycle
             
-            if np.random.random() < 0.05:
-                spike_multiplier = np.random.uniform(1.5, 2.5)
+            if rng.random() < 0.05:
+                spike_multiplier = rng.uniform(1.5, 2.5)
                 price_gpu *= spike_multiplier
             
             price_gpu = max(0.1, price_gpu)  # Keep positive
@@ -113,40 +143,20 @@ def save_traces(carbon_df: pd.DataFrame, price_df: pd.DataFrame) -> None:
 
 
 if __name__ == "__main__":
-    # Set random seed for reproducibility
-    np.random.seed(42)
-    
-    # Define three regions with REAL TRADEOFFS (not one dominates all)
-    # Region 1: Clean but Expensive (green energy, premium pricing)
-    # Region 2: Cheap but Dirty (coal/fossil heavy, cheap due to abundance)
-    # Region 3: Balanced (moderate on both cost and emissions)
-    regions = [
-        {
-            "name": "region-green-premium",
-            "carbon_base": 100,      # Very clean (renewable-heavy)
-            "carbon_amplitude": 50,   # Small variation
-            "price_cpu_base": 0.12,   # Premium pricing
-            "price_gpu_base": 1.2,
-        },
-        {
-            "name": "region-cheap-dirty",
-            "carbon_base": 400,      # Very dirty (coal-heavy)
-            "carbon_amplitude": 150,  # Higher variation
-            "price_cpu_base": 0.02,   # Very cheap
-            "price_gpu_base": 0.3,
-        },
-        {
-            "name": "region-balanced",
-            "carbon_base": 250,      # Middle baseline
-            "carbon_amplitude": 120,  # Moderate variation
-            "price_cpu_base": 0.06,   # Middle price
-            "price_gpu_base": 0.65,
-        },
-    ]
-    
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="random seed for reproducible traces (default: 42)",
+    )
+    args = parser.parse_args()
+
     # Generate traces for 1 week (168 hours)
     print("Generating synthetic carbon and price traces...")
-    combined_df, carbon_df, price_df = generate_region_traces(regions, hours=168)
+    combined_df, carbon_df, price_df = generate_region_traces(
+        DEFAULT_REGIONS, hours=168, seed=args.seed
+    )
     
     # Save to CSVs
     save_traces(carbon_df, price_df)
@@ -176,12 +186,16 @@ if __name__ == "__main__":
     ).round(2)
     print(gpu_summary)
     
-    # Visual sanity check: show daily pattern for one region
-    print("\n" + "="*60)
-    print("SAMPLE: Carbon intensity pattern for region-clean-night (first 24 hours)")
-    print("="*60)
-    sample = combined_df[
-        (combined_df["region"] == "region-clean-night") & 
-        (combined_df["timestamp"] < datetime(2024, 1, 2))
-    ].reset_index(drop=True)
-    print(sample[["timestamp", "hour_of_day", "carbon_intensity_gco2_kwh"]].to_string())
+    # Show the first day's carbon pattern for each generated region.
+    for region_name in combined_df["region"].unique():
+        print("\n" + "="*60)
+        print(
+            f"SAMPLE: Carbon intensity pattern for {region_name} "
+            "(first 24 hours)"
+        )
+        print("="*60)
+        sample = combined_df[
+            (combined_df["region"] == region_name)
+            & (combined_df["timestamp"] < datetime(2024, 1, 2))
+        ].reset_index(drop=True)
+        print(sample[["timestamp", "hour_of_day", "carbon_intensity_gco2_kwh"]].to_string())

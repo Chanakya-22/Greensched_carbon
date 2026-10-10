@@ -7,7 +7,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import random
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,9 +23,6 @@ from scheduler.policies import (
 def run_comparison():
     """Run all four policies on the same job set and compare results."""
     
-    # Set seed for reproducibility
-    random.seed(42)
-    
     # Generate one fixed job list to use across all four runs
     # Use tighter deadlines to create scheduling challenges
     print("Generating fixed job set for fair comparison...")
@@ -34,7 +30,8 @@ def run_comparison():
         num_jobs=60,
         window_hours=168,
         min_slack_hours=0.5,  # Tighter deadlines
-        max_slack_hours=3.0   # Less flexibility
+        max_slack_hours=3.0,  # Less flexibility
+        seed=42,
     )
     
     # Define the four policies
@@ -84,41 +81,49 @@ def run_comparison():
     print("POLICY COMPARISON TABLE")
     print("="*100)
     
+    fifo_cost = results["FIFO OnDemand"]["total_cost"]
+    fifo_carbon = results["FIFO OnDemand"]["total_carbon"]
+
     comparison_data = []
     for policy_name, metrics in results.items():
+        cost_change = 100 * (
+            metrics["total_cost"] - fifo_cost
+        ) / fifo_cost
+        carbon_change = 100 * (
+            metrics["total_carbon"] - fifo_carbon
+        ) / fifo_carbon
         comparison_data.append({
             "Policy": policy_name,
             "Total Cost ($)": round(metrics["total_cost"], 2),
             "Total Carbon (g CO2)": int(metrics["total_carbon"]),
             "Deadline Success Rate (%)": round(metrics["deadline_success_rate"], 1),
             "Avg Completion Time (hrs)": round(metrics["avg_completion_time"], 1),
+            "Cost change vs FIFO (negative = better) (%)": round(cost_change, 1),
+            "Carbon change vs FIFO (negative = better) (%)": round(carbon_change, 1),
         })
     
     comparison_df = pd.DataFrame(comparison_data)
-    print(comparison_df.to_string(index=False))
+    percentage_formatters = {
+        "Cost change vs FIFO (negative = better) (%)": lambda value: f"{value:+.1f}%",
+        "Carbon change vs FIFO (negative = better) (%)": lambda value: f"{value:+.1f}%",
+    }
+    print(comparison_df.to_string(index=False, formatters=percentage_formatters))
     
     # Calculate improvements
     print("\n" + "="*100)
-    print("IMPROVEMENT OVER FIFO BASELINE")
+    print("CHANGE VS FIFO (SIGNED PERCENTAGES; NEGATIVE = BETTER)")
     print("="*100)
-    
-    fifo_cost = results["FIFO OnDemand"]["total_cost"]
-    fifo_carbon = results["FIFO OnDemand"]["total_carbon"]
-    
-    improvements = []
-    for policy_name, metrics in results.items():
-        if policy_name != "FIFO OnDemand":
-            cost_improvement = 100 * (fifo_cost - metrics["total_cost"]) / fifo_cost
-            carbon_improvement = 100 * (fifo_carbon - metrics["total_carbon"]) / fifo_carbon
-            
-            improvements.append({
-                "Policy": policy_name,
-                "Cost Savings (%)": round(cost_improvement, 1),
-                "Carbon Reduction (%)": round(carbon_improvement, 1),
-            })
-    
-    improvements_df = pd.DataFrame(improvements)
-    print(improvements_df.to_string(index=False))
+    change_columns = [
+        "Policy",
+        "Cost change vs FIFO (negative = better) (%)",
+        "Carbon change vs FIFO (negative = better) (%)",
+    ]
+    print(
+        comparison_df[change_columns].to_string(
+            index=False,
+            formatters=percentage_formatters,
+        )
+    )
     
     # Save comparison table to CSV
     csv_path = "docs/policy_comparison.csv"
@@ -201,11 +206,34 @@ def run_comparison():
     print("\n" + "="*100)
     print("SUMMARY")
     print("="*100)
-    print(f"✓ Ran all 4 policies on a fixed set of {len(jobs)} jobs")
-    print(f"✓ Joint Policy cost: ${results['Joint Policy']['total_cost']:.2f} " +
-          f"({100*(fifo_cost-results['Joint Policy']['total_cost'])/fifo_cost:.1f}% savings vs FIFO)")
-    print(f"✓ Joint Policy carbon: {results['Joint Policy']['total_carbon']:.0f}g CO2 " +
-          f"({100*(fifo_carbon-results['Joint Policy']['total_carbon'])/fifo_carbon:.1f}% reduction vs FIFO)")
+    print(f"✓ Ran all {len(policies)} policies on a fixed set of {len(jobs)} jobs")
+
+    joint_cost_change = (
+        results["Joint Policy"]["total_cost"] - fifo_cost
+    ) / fifo_cost * 100
+    joint_carbon_change = (
+        results["Joint Policy"]["total_carbon"] - fifo_carbon
+    ) / fifo_carbon * 100
+    cost_direction = (
+        "reduces" if joint_cost_change < 0
+        else "increases" if joint_cost_change > 0
+        else "does not change"
+    )
+    carbon_direction = (
+        "reduces" if joint_carbon_change < 0
+        else "increases" if joint_carbon_change > 0
+        else "does not change"
+    )
+    print(
+        f"✓ Joint Policy {cost_direction} cost by "
+        f"{abs(joint_cost_change):.1f}% vs FIFO "
+        f"(signed change: {joint_cost_change:+.1f}%)"
+    )
+    print(
+        f"✓ Joint Policy {carbon_direction} carbon by "
+        f"{abs(joint_carbon_change):.1f}% vs FIFO "
+        f"(signed change: {joint_carbon_change:+.1f}%)"
+    )
     print(f"✓ Deadline success rates: " + ", ".join(f"{p}: {r['deadline_success_rate']:.1f}%" for p, r in results.items()))
     print(f"\n✓ Results saved to:")
     print(f"  - {csv_path}")
