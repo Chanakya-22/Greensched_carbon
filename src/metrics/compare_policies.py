@@ -7,7 +7,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import random
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,9 +23,6 @@ from scheduler.policies import (
 def run_comparison():
     """Run all four policies on the same job set and compare results."""
     
-    # Set seed for reproducibility
-    random.seed(42)
-    
     # Generate one fixed job list to use across all four runs
     # Use tighter deadlines to create scheduling challenges
     print("Generating fixed job set for fair comparison...")
@@ -34,7 +30,8 @@ def run_comparison():
         num_jobs=60,
         window_hours=168,
         min_slack_hours=0.5,  # Tighter deadlines
-        max_slack_hours=3.0   # Less flexibility
+        max_slack_hours=3.0,  # Less flexibility
+        seed=42,
     )
     
     # Define the four policies
