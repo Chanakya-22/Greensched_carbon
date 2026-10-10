@@ -1,10 +1,6 @@
-torch
-torchvision
-open_clip_torch
-transformers
-faiss-cpu
-simpy
+numpy
 pandas
 matplotlib
 requests
 python-dotenv
+pytest

@@ -21,7 +21,5 @@ phase_plan.md
 .mypy_cache/
 
 # Temporary and test artifacts
-test_*.py
-debug_*.py
 *.png
 !docs/*.png

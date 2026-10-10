@@ -14,6 +14,21 @@ A research project skeleton for carbon-aware scheduling experiments.
 - notebooks: analysis and plotting notebooks
 - docs: papers and diagrams
 
-## Data setup
+## Quick start
 
-Raw trace CSV files are intentionally excluded from version control to avoid bloating the repository. Place downloaded CSV files in the appropriate data directory before running experiments, or add a fetch script to populate them automatically.
+From the repository root, create and activate a virtual environment, install the
+core dependencies, generate the sample traces, and run the policy comparison:
+
+```powershell
+$env:PYTHONIOENCODING = "utf-8"
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python src/data/synthetic_data.py
+python src/metrics/compare_policies.py
+```
+
+The trace CSVs are generated locally by `src/data/synthetic_data.py` and are
+not committed to the repository. They are synthetic sample data, not real
+observed grid-carbon or electricity-price data; no real trace data is included
+in this project skeleton.
