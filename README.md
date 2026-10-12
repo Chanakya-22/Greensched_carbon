@@ -72,3 +72,16 @@ The tight-slack CSV and readable horizontal-bar chart are generated at
 `docs/policy_comparison.csv` and `docs/policy_comparison.png`; the relaxed-slack
 outputs are at `docs/policy_comparison_relaxed.csv` and
 `docs/policy_comparison_relaxed.png`.
+
+## Results: slack and forecast-error sweeps
+
+`python src/metrics/slack_sweep.py` runs both reproducible sweeps using
+synthetic traces (not real observed grid-carbon or electricity-price data).
+The slack sweep compares all seven policies at fixed slack values of
+1, 2, 4, 8, 12, and 24 hours. The forecast-error sweep evaluates Joint-Wait at
+12 hours of slack across four forecast error levels and five paired job and
+forecast seeds. Results are saved to `docs/slack_sweep.csv` and
+`docs/forecast_error.csv`.
+
+- [Slack sweep figure](docs/slack_sweep.png)
+- [Forecast-error sweep figure](docs/forecast_error.png)
