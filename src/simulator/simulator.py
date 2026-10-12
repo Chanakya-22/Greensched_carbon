@@ -6,6 +6,8 @@ The CPU price column is USD per 16-core instance-hour, charged pro rata
 by cores. The GPU price column is USD per GPU-hour.
 """
 from dataclasses import dataclass
+import math
+import numpy as np
 import pandas as pd
 from typing import Callable, List, Dict, Optional, Tuple
 
@@ -29,6 +31,9 @@ class Simulator:
         carbon_csv_path: str,
         price_csv_path: str,
         resource_model: Optional[ResourceModel] = None,
+        forecast_horizon_hours: int = 24,
+        forecast_error_std: float = 0.0,
+        forecast_seed: int = 0,
     ):
         """
         Initialize simulator with carbon and price data.
@@ -37,10 +42,20 @@ class Simulator:
             carbon_csv_path: Path to carbon intensity CSV
             price_csv_path: Path to spot price CSV
             resource_model: CPU instance sizing and per-resource power draw
+            forecast_horizon_hours: Maximum number of hours to consider future starts
+            forecast_error_std: Standard deviation of log-normal forecast error
+            forecast_seed: Seed used to generate reproducible forecast errors
         """
+        if forecast_horizon_hours < 0:
+            raise ValueError("forecast_horizon_hours must be non-negative.")
+        if forecast_error_std < 0:
+            raise ValueError("forecast_error_std must be non-negative.")
+
         self.carbon_df = pd.read_csv(carbon_csv_path)
         self.price_df = pd.read_csv(price_csv_path)
         self.resource_model = resource_model if resource_model is not None else ResourceModel()
+        self.forecast_horizon_hours = forecast_horizon_hours
+        self.forecast_error_std = forecast_error_std
         
         # Parse timestamps
         self.carbon_df["timestamp"] = pd.to_datetime(self.carbon_df["timestamp"])
@@ -63,6 +78,104 @@ class Simulator:
         
         self.results = []
         self.region_names = self.carbon_df["region"].unique().tolist()
+        self._build_forecast_noise(forecast_seed)
+
+    def _build_forecast_noise(self, seed: int) -> None:
+        """Create fixed multiplicative forecast errors for each trace point."""
+        rng = np.random.default_rng(seed)
+        price_keys = list(self.price_index.index)
+        carbon_keys = list(self.carbon_index.index)
+        if self.forecast_error_std == 0:
+            self._price_noise = dict.fromkeys(price_keys, 1.0)
+            self._carbon_noise = dict.fromkeys(carbon_keys, 1.0)
+            return
+
+        self._price_noise = dict(zip(
+            price_keys,
+            np.exp(rng.normal(0, self.forecast_error_std, len(price_keys))),
+        ))
+        self._carbon_noise = dict(zip(
+            carbon_keys,
+            np.exp(rng.normal(0, self.forecast_error_std, len(carbon_keys))),
+        ))
+
+    def _integrate_forecast_window(
+        self,
+        region: str,
+        job_type: str,
+        start: int,
+        duration: float,
+        current_hour: int,
+    ) -> Tuple[float, float]:
+        """Integrate forecast price and intensity over a proposed run window."""
+        end = start + duration
+        if duration <= 0:
+            raise ValueError(f"Job duration must be positive, got {duration}.")
+
+        trace_end = min(
+            self.carbon_df.loc[self.carbon_df["region"] == region, "hour"].max() + 1,
+            self.price_df.loc[self.price_df["region"] == region, "hour"].max() + 1,
+        )
+        if pd.isna(trace_end) or end > trace_end:
+            raise ValueError(
+                f"Forecast window [{start}, {end}) for region '{region}' extends "
+                f"past the end of the available trace (hour {trace_end})."
+            )
+
+        price_column = (
+            "price_cpu_usd_hr" if job_type == "cpu_openmp" else "price_gpu_usd_hr"
+        )
+        price_integral = 0.0
+        intensity_integral = 0.0
+        final_hour = math.ceil(end)
+        for hour in range(start, final_hour):
+            overlap = min(end, hour + 1) - max(start, hour)
+            if overlap <= 0:
+                continue
+            key = (region, hour)
+            try:
+                price = float(self.price_index.loc[key, price_column])
+                intensity = float(
+                    self.carbon_index.loc[key, "carbon_intensity_gco2_kwh"]
+                )
+            except KeyError as error:
+                raise ValueError(
+                    f"Missing hourly trace data for region '{region}' at hour {hour}."
+                ) from error
+
+            if hour > current_hour:
+                price *= self._price_noise[key]
+                intensity *= self._carbon_noise[key]
+            price_integral += overlap * price
+            intensity_integral += overlap * intensity
+
+        return price_integral / duration, intensity_integral / duration
+
+    def build_candidates(self, job, current_hour: int) -> List[Dict]:
+        """Build region/start choices with duration-weighted forecast averages."""
+        duration = job.duration_estimate_hours
+        latest_start = math.floor(job.deadline - duration + 1e-9)
+        final_start = min(
+            latest_start,
+            current_hour + self.forecast_horizon_hours,
+        )
+        candidates = []
+        for region in self.region_names:
+            for start_hour in range(current_hour, final_start + 1):
+                price, intensity = self._integrate_forecast_window(
+                    region,
+                    job.job_type,
+                    start_hour,
+                    duration,
+                    current_hour,
+                )
+                candidates.append({
+                    "region": region,
+                    "start_hour": start_hour,
+                    "price_per_hr": price,
+                    "carbon_intensity": intensity,
+                })
+        return candidates
 
     def integrate_window(
         self,
@@ -204,18 +317,33 @@ class Simulator:
                 if not region_options:
                     continue  # No regions available
                 
-                # Call policy
-                decision = policy(job, current_hour, region_options)
+                # Only forecast-aware policies receive the look-ahead candidates.
+                uses_forecast = getattr(policy, "needs_forecast", False) is True
+                if uses_forecast:
+                    candidates = self.build_candidates(job, current_hour)
+                    decision = policy(
+                        job,
+                        current_hour,
+                        region_options,
+                        forecast=candidates,
+                    )
+                else:
+                    decision = policy(job, current_hour, region_options)
                 
                 if decision != "wait" and decision is not None:
                     # Schedule this job
                     region_dict = decision
                     region_name = region_dict["region"]
+                    start_hour = (
+                        region_dict.get("start_hour", current_hour)
+                        if uses_forecast
+                        else current_hour
+                    )
 
                     price_integral, intensity_integral = self.integrate_window(
                         region_name,
                         job.job_type,
-                        current_hour,
+                        start_hour,
                         job.duration_estimate_hours,
                     )
                     if job.job_type == "cpu_openmp":
@@ -238,7 +366,7 @@ class Simulator:
                     carbon_emitted = power_kw * intensity_integral
                     
                     # Completion hour
-                    completion_hour = current_hour + job.duration_estimate_hours
+                    completion_hour = start_hour + job.duration_estimate_hours
                     
                     # Check deadline
                     met_deadline = (completion_hour <= job.deadline)
@@ -247,8 +375,8 @@ class Simulator:
                         "job_id": job.job_id,
                         "job_type": job.job_type,
                         "region_used": region_name,
-                        "start_hour": current_hour,
-                        "wait_hours": current_hour - job.arrival_time,
+                        "start_hour": start_hour,
+                        "wait_hours": start_hour - job.arrival_time,
                         "completion_hour": completion_hour,
                         "met_deadline": met_deadline,
                         "cost_incurred": cost_incurred,
