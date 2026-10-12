@@ -1,33 +1,46 @@
 """
-Discrete-event simulator for job scheduling across regions.
+Hour-stepped simulator for job scheduling across regions.
 Executes jobs according to a scheduling policy and records outcomes.
+
+The CPU price column is USD per 16-core instance-hour, charged pro rata
+by cores. The GPU price column is USD per GPU-hour.
 """
+from dataclasses import dataclass
 import pandas as pd
-from typing import Callable, List, Dict, Optional
-from datetime import datetime
+from typing import Callable, List, Dict, Optional, Tuple
+
+
+@dataclass
+class ResourceModel:
+    """Resource power and CPU instance sizing used for job accounting."""
+
+    cpu_cores_per_instance: float = 16
+    cpu_power_per_core_kw: float = 0.01
+    gpu_power_per_gpu_kw: float = 0.4
 
 
 class Simulator:
     """
     Simulates job scheduling across multiple regions with carbon and price data.
     """
-    
-    # Power draw estimates (kW)
-    POWER_DRAW = {
-        "cpu_openmp": 0.15,  # kW per CPU job
-        "gpu_cuda": 0.4,      # kW per GPU job
-    }
-    
-    def __init__(self, carbon_csv_path: str, price_csv_path: str):
+
+    def __init__(
+        self,
+        carbon_csv_path: str,
+        price_csv_path: str,
+        resource_model: Optional[ResourceModel] = None,
+    ):
         """
         Initialize simulator with carbon and price data.
         
         Args:
             carbon_csv_path: Path to carbon intensity CSV
             price_csv_path: Path to spot price CSV
+            resource_model: CPU instance sizing and per-resource power draw
         """
         self.carbon_df = pd.read_csv(carbon_csv_path)
         self.price_df = pd.read_csv(price_csv_path)
+        self.resource_model = resource_model if resource_model is not None else ResourceModel()
         
         # Parse timestamps
         self.carbon_df["timestamp"] = pd.to_datetime(self.carbon_df["timestamp"])
@@ -50,6 +63,65 @@ class Simulator:
         
         self.results = []
         self.region_names = self.carbon_df["region"].unique().tolist()
+
+    def integrate_window(
+        self,
+        region: str,
+        job_type: str,
+        start: float,
+        duration: float,
+    ) -> Tuple[float, float]:
+        """Integrate price and carbon intensity over a job's run window.
+
+        Each hourly trace value applies to its half-open hour [k, k + 1).
+        Returns (price integral, intensity integral), both weighted by
+        overlapping hours but not by the job's resource quantity.
+        """
+        start = float(start)
+        duration = float(duration)
+        end = start + duration
+        if start < 0:
+            raise ValueError(f"Job window starts before the trace at hour {start}.")
+        if duration < 0:
+            raise ValueError(f"Job duration must be non-negative, got {duration}.")
+        if duration == 0:
+            return 0.0, 0.0
+
+        trace_end = min(
+            self.carbon_df.loc[self.carbon_df["region"] == region, "hour"].max() + 1,
+            self.price_df.loc[self.price_df["region"] == region, "hour"].max() + 1,
+        )
+        if pd.isna(trace_end) or end > trace_end:
+            raise ValueError(
+                f"Job window [{start}, {end}) for region '{region}' extends "
+                f"past the end of the available trace (hour {trace_end})."
+            )
+
+        price_column = (
+            "price_cpu_usd_hr" if job_type == "cpu_openmp" else "price_gpu_usd_hr"
+        )
+        price_integral = 0.0
+        intensity_integral = 0.0
+        first_hour = int(start)
+        final_hour = int(end) if end.is_integer() else int(end) + 1
+
+        for hour in range(first_hour, final_hour):
+            overlap = min(end, hour + 1) - max(start, hour)
+            if overlap <= 0:
+                continue
+            try:
+                price = self.price_index.loc[(region, hour), price_column]
+                intensity = self.carbon_index.loc[
+                    (region, hour), "carbon_intensity_gco2_kwh"
+                ]
+            except KeyError as error:
+                raise ValueError(
+                    f"Missing hourly trace data for region '{region}' at hour {hour}."
+                ) from error
+            price_integral += overlap * float(price)
+            intensity_integral += overlap * float(intensity)
+
+        return price_integral, intensity_integral
     
     def get_region_options(
         self,
@@ -139,22 +211,31 @@ class Simulator:
                     # Schedule this job
                     region_dict = decision
                     region_name = region_dict["region"]
-                    
-                    # Calculate cost and carbon
-                    cost_incurred = (
-                        job.duration_estimate_hours * 
-                        region_dict["price_per_hr"]
+
+                    price_integral, intensity_integral = self.integrate_window(
+                        region_name,
+                        job.job_type,
+                        current_hour,
+                        job.duration_estimate_hours,
                     )
-                    
-                    # Power draw in kW
-                    power_kw = self.POWER_DRAW[job.job_type]
-                    
-                    # Carbon: kW * hours * gCO2/kWh = gCO2
-                    carbon_emitted = (
-                        power_kw *
-                        job.duration_estimate_hours *
-                        region_dict["carbon_intensity"]
-                    )
+                    if job.job_type == "cpu_openmp":
+                        units = (
+                            job.resource_requirement
+                            / self.resource_model.cpu_cores_per_instance
+                        )
+                        power_kw = (
+                            job.resource_requirement
+                            * self.resource_model.cpu_power_per_core_kw
+                        )
+                    else:  # gpu_cuda
+                        units = job.resource_requirement
+                        power_kw = (
+                            job.resource_requirement
+                            * self.resource_model.gpu_power_per_gpu_kw
+                        )
+
+                    cost_incurred = units * price_integral
+                    carbon_emitted = power_kw * intensity_integral
                     
                     # Completion hour
                     completion_hour = current_hour + job.duration_estimate_hours
@@ -167,6 +248,7 @@ class Simulator:
                         "job_type": job.job_type,
                         "region_used": region_name,
                         "start_hour": current_hour,
+                        "wait_hours": current_hour - job.arrival_time,
                         "completion_hour": completion_hour,
                         "met_deadline": met_deadline,
                         "cost_incurred": cost_incurred,
@@ -187,6 +269,7 @@ class Simulator:
                 "job_type": job.job_type,
                 "region_used": None,
                 "start_hour": None,
+                "wait_hours": None,
                 "completion_hour": None,
                 "met_deadline": False,
                 "cost_incurred": 0.0,

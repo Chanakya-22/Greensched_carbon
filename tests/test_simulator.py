@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from jobs.job import Job
-from simulator.simulator import Simulator
+from simulator.simulator import ResourceModel, Simulator
 
 
 def _select_first_region(_job, _current_hour, region_options):
@@ -42,6 +42,29 @@ def simulator_csvs(tmp_path):
     pd.DataFrame(carbon_rows).to_csv(carbon_path, index=False)
     pd.DataFrame(price_rows).to_csv(price_path, index=False)
 
+    return Simulator(
+        str(carbon_path),
+        str(price_path),
+        resource_model=ResourceModel(),
+    )
+
+
+@pytest.fixture
+def hand_computed_simulator(tmp_path):
+    timestamps = pd.date_range("2024-01-01", periods=6, freq="h")
+    carbon_path = tmp_path / "hand-carbon.csv"
+    price_path = tmp_path / "hand-prices.csv"
+    pd.DataFrame({
+        "region": ["region-a"] * 6,
+        "timestamp": timestamps,
+        "carbon_intensity_gco2_kwh": [100, 200, 300, 400, 500, 600],
+    }).to_csv(carbon_path, index=False)
+    pd.DataFrame({
+        "region": ["region-a"] * 6,
+        "timestamp": timestamps,
+        "price_cpu_usd_hr": [1, 2, 3, 4, 5, 6],
+        "price_gpu_usd_hr": [1, 2, 3, 4, 5, 6],
+    }).to_csv(price_path, index=False)
     return Simulator(str(carbon_path), str(price_path))
 
 
@@ -59,10 +82,46 @@ def test_cost_and_carbon_are_computed_from_duration_and_region_data(simulator_cs
     result = results.iloc[0]
 
     assert result["region_used"] == "region-a"
-    assert result["cost_incurred"] == pytest.approx(2 * 0.5)
-    assert result["carbon_emitted_g"] == pytest.approx(
-        Simulator.POWER_DRAW["cpu_openmp"] * 2 * 100
+    assert result["cost_incurred"] == pytest.approx((1 / 16) * 2 * 0.5)
+    assert result["carbon_emitted_g"] == pytest.approx(1 * 0.01 * 2 * 100)
+    assert result["wait_hours"] == 0
+
+
+def test_cpu_window_integrates_hourly_price_and_intensity(hand_computed_simulator):
+    job = Job(
+        job_id="job-cpu-window",
+        job_type="cpu_openmp",
+        arrival_time=1,
+        deadline=5,
+        duration_estimate_hours=2.5,
+        resource_requirement=8,
     )
+
+    result = hand_computed_simulator.run([job], _select_first_region).iloc[0]
+
+    assert result["cost_incurred"] == pytest.approx(3.5)
+    assert result["carbon_emitted_g"] == pytest.approx(56)
+
+
+def test_gpu_window_integrates_hourly_price_and_intensity(hand_computed_simulator):
+    job = Job(
+        job_id="job-gpu-window",
+        job_type="gpu_cuda",
+        arrival_time=1,
+        deadline=5,
+        duration_estimate_hours=2.5,
+        resource_requirement=2,
+    )
+
+    result = hand_computed_simulator.run([job], _select_first_region).iloc[0]
+
+    assert result["cost_incurred"] == pytest.approx(14)
+    assert result["carbon_emitted_g"] == pytest.approx(560)
+
+
+def test_job_window_past_trace_end_raises_value_error(hand_computed_simulator):
+    with pytest.raises(ValueError, match="extends past the end of the available trace"):
+        hand_computed_simulator.integrate_window("region-a", "cpu_openmp", 5, 2)
 
 
 def test_start_immediately_policy_meets_each_deadline(simulator_csvs):
@@ -109,6 +168,7 @@ def test_wait_forever_marks_job_unscheduled_and_failed(simulator_csvs):
 
     assert pd.isna(result["region_used"])
     assert pd.isna(result["start_hour"])
+    assert pd.isna(result["wait_hours"])
     assert pd.isna(result["completion_hour"])
     assert not result["met_deadline"]
     assert result["cost_incurred"] == 0
