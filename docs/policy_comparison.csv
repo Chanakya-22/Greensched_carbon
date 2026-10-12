@@ -1,5 +1,8 @@
-Policy,Total Cost ($),Total Carbon (g CO2),Deadline Success Rate (%),Avg Completion Time (hrs),Cost change vs FIFO (negative = better) (%),Carbon change vs FIFO (negative = better) (%)
-FIFO OnDemand,492.84,43759,100.0,89.1,0.0,0.0
-Cheapest First,363.81,62388,100.0,89.1,-26.2,42.6
-Cleanest First,641.8,17558,100.0,89.1,30.2,-59.9
-Joint Policy,464.41,36938,100.0,89.1,-5.8,-15.6
+Policy,Total Cost (USD),Total Carbon (gCO2eq),Average Wait (hours),Deadline Success (%),Cost vs FIFO (%),Carbon vs FIFO (%)
+FIFO OnDemand,842.249546,84896.486723,0.000000,100.000000,0.000000,0.000000
+Cheapest First,796.174315,100458.232112,0.000000,100.000000,-5.470496,18.330258
+Cleanest First,1131.392534,33712.462242,0.000000,100.000000,34.329848,-60.289921
+Joint Policy,952.515848,62797.488502,0.000000,100.000000,13.091880,-26.030521
+Cheapest-Wait,625.356938,131715.280868,0.333333,100.000000,-25.751585,55.148094
+Cleanest-Wait,1084.903466,33082.201381,0.433333,100.000000,28.810217,-61.032308
+Joint-Wait,908.643408,61138.054066,0.400000,100.000000,7.882920,-27.985178
