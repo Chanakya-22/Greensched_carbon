@@ -195,3 +195,114 @@ def joint_policy(
             best_region = region
     
     return best_region if best_region else "wait"
+
+
+def make_wait_policy(
+    objective: str,
+    w_cost: float = 0.5,
+    margin: float = 0.02,
+    allow_wait: bool = True,
+):
+    """Create a forecast-aware window policy, optionally waiting for improvements."""
+    if objective not in {"cost", "carbon", "joint"}:
+        raise ValueError("objective must be 'cost', 'carbon', or 'joint'.")
+    if not 0 <= w_cost <= 1:
+        raise ValueError("w_cost must be between 0 and 1.")
+    if margin < 0:
+        raise ValueError("margin must be non-negative.")
+
+    def wait_policy(job, current_hour: int, region_options, *, forecast):
+        del job, region_options
+        if not allow_wait:
+            forecast = [
+                candidate for candidate in forecast
+                if candidate["start_hour"] == current_hour
+            ]
+        if not forecast:
+            if not allow_wait:
+                raise ValueError(
+                    "No current-hour forecast candidate is available for this window policy."
+                )
+            return "wait"
+
+        if objective == "joint":
+            prices = [candidate["price_per_hr"] for candidate in forecast]
+            carbons = [candidate["carbon_intensity"] for candidate in forecast]
+            min_price, max_price = min(prices), max(prices)
+            min_carbon, max_carbon = min(carbons), max(carbons)
+            price_range = max_price - min_price
+            carbon_range = max_carbon - min_carbon
+
+            def score(candidate):
+                norm_price = (
+                    (candidate["price_per_hr"] - min_price) / price_range
+                    if price_range
+                    else 0.0
+                )
+                norm_carbon = (
+                    (candidate["carbon_intensity"] - min_carbon) / carbon_range
+                    if carbon_range
+                    else 0.0
+                )
+                return w_cost * norm_price + (1 - w_cost) * norm_carbon
+
+        elif objective == "cost":
+            score = lambda candidate: candidate["price_per_hr"]
+        else:
+            score = lambda candidate: candidate["carbon_intensity"]
+
+        best_now = min(
+            (
+                candidate
+                for candidate in forecast
+                if candidate["start_hour"] == current_hour
+            ),
+            key=score,
+            default=None,
+        )
+        best_future = (
+            min(
+                (
+                    candidate
+                    for candidate in forecast
+                    if candidate["start_hour"] > current_hour
+                ),
+                key=score,
+                default=None,
+            )
+            if allow_wait
+            else None
+        )
+
+        if best_now is None:
+            return min(forecast, key=score)
+
+        if best_future is not None:
+            if objective == "joint":
+                should_wait = score(best_future) + margin < score(best_now)
+            else:
+                should_wait = (
+                    score(best_future) * (1 + margin) < score(best_now)
+                )
+            if should_wait:
+                return "wait"
+
+        return {
+            "region": best_now["region"],
+            "carbon_intensity": best_now["carbon_intensity"],
+            "price_per_hr": best_now["price_per_hr"],
+        }
+
+    wait_policy.__name__ = (
+        f"{objective}_{'wait' if allow_wait else 'window'}_policy"
+    )
+    wait_policy.needs_forecast = True
+    return wait_policy
+
+
+cheapest_wait_policy = make_wait_policy("cost")
+cleanest_wait_policy = make_wait_policy("carbon")
+joint_wait_policy = make_wait_policy("joint")
+cheapest_window = make_wait_policy("cost", allow_wait=False)
+cleanest_window = make_wait_policy("carbon", allow_wait=False)
+joint_window = make_wait_policy("joint", allow_wait=False)
