@@ -16,6 +16,9 @@ from scheduler.policies import (
     cheapest_wait_policy,
     cleanest_wait_policy,
     joint_wait_policy,
+    cheapest_window,
+    cleanest_window,
+    joint_window,
 )
 
 
@@ -29,6 +32,9 @@ def run_comparison():
         "Cheapest-Wait": cheapest_wait_policy,
         "Cleanest-Wait": cleanest_wait_policy,
         "Joint-Wait": joint_wait_policy,
+        "Cheapest-Window": cheapest_window,
+        "Cleanest-Window": cleanest_window,
+        "Joint-Window": joint_window,
     }
     scenarios = {
         "Tight slack": (0.5, 3.0, ""),
@@ -125,10 +131,7 @@ def run_comparison():
 def _save_scenario_chart(scenario_name, results, output_path):
     """Write a readable four-metric chart with horizontal policy labels."""
     policy_names = list(results)
-    colors = [
-        "#4c78a8", "#f58518", "#54a24b", "#e45756",
-        "#72b7b2", "#b279a2", "#ff9da6",
-    ]
+    colors = list(plt.get_cmap("tab10").colors)
     metrics = [
         ("total_cost", "Total Cost (USD)"),
         ("total_carbon", "Total Carbon (gCO2eq)"),
@@ -137,7 +140,7 @@ def _save_scenario_chart(scenario_name, results, output_path):
     ]
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle(
-        f"{scenario_name}: seven scheduling policies",
+        f"{scenario_name}: ten scheduling policies",
         fontsize=16,
         fontweight="bold",
     )

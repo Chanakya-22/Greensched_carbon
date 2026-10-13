@@ -55,6 +55,9 @@ undefined.
 | Cheapest-Wait | 625.36 | 131715 | 0.33 | 100.0 | -25.8% | +55.1% |
 | Cleanest-Wait | 1084.90 | 33082 | 0.43 | 100.0 | +28.8% | -61.0% |
 | Joint-Wait | 908.64 | 61138 | 0.40 | 100.0 | +7.9% | -28.0% |
+| Cheapest-Window | 652.53 | 133697 | 0.00 | 100.0 | -22.5% | +57.5% |
+| Cleanest-Window | 1131.39 | 33712 | 0.00 | 100.0 | +34.3% | -60.3% |
+| Joint-Window | 926.05 | 67277 | 0.00 | 100.0 | +9.9% | -20.8% |
 
 ### Relaxed slack (2-12 hours)
 
@@ -67,6 +70,9 @@ undefined.
 | Cheapest-Wait | 467.75 | 123748 | 2.82 | 100.0 | -44.5% | +45.8% |
 | Cleanest-Wait | 850.36 | 30284 | 3.08 | 100.0 | +1.0% | -64.3% |
 | Joint-Wait | 723.19 | 51353 | 3.15 | 100.0 | -14.1% | -39.5% |
+| Cheapest-Window | 652.53 | 133697 | 0.00 | 100.0 | -22.5% | +57.5% |
+| Cleanest-Window | 1131.39 | 33712 | 0.00 | 100.0 | +34.3% | -60.3% |
+| Joint-Window | 926.05 | 67277 | 0.00 | 100.0 | +9.9% | -20.8% |
 
 The tight-slack CSV and readable horizontal-bar chart are generated at
 `docs/policy_comparison.csv` and `docs/policy_comparison.png`; the relaxed-slack
@@ -75,13 +81,18 @@ outputs are at `docs/policy_comparison_relaxed.csv` and
 
 ## Results: slack and forecast-error sweeps
 
-`python src/metrics/slack_sweep.py` runs both reproducible sweeps using
-synthetic traces (not real observed grid-carbon or electricity-price data).
-The slack sweep compares all seven policies at fixed slack values of
-1, 2, 4, 8, 12, and 24 hours. The forecast-error sweep evaluates Joint-Wait at
-12 hours of slack across four forecast error levels and five paired job and
-forecast seeds. Results are saved to `docs/slack_sweep.csv` and
-`docs/forecast_error.csv`.
+These sweeps use **single seed, synthetic traces with a 24h cycle, perfect
+forecast unless stated**; none of the trace data is real. Run
+`python src/metrics/slack_sweep.py` to compare all ten policies at fixed slack
+values of 1, 2, 4, 8, 12, 16, 20, and 24 hours, isolate the time-shifting
+effect at slack 1, 4, 12, and 24, and evaluate Joint-Wait at 12 hours of slack
+across four forecast-error levels. Forecast-error results pair the same 20 job
+seeds at every level and report mean paired differences from sigma=0 with
+two-sided 95% Student t intervals and mean wait hours.
+
+Results are saved to `docs/slack_sweep.csv`, `docs/ablation_timeshift.csv`,
+and `docs/forecast_error.csv`.
 
 - [Slack sweep figure](docs/slack_sweep.png)
+- [Time-shifting ablation figure](docs/ablation_timeshift.png)
 - [Forecast-error sweep figure](docs/forecast_error.png)

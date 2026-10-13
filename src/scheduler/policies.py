@@ -201,8 +201,9 @@ def make_wait_policy(
     objective: str,
     w_cost: float = 0.5,
     margin: float = 0.02,
+    allow_wait: bool = True,
 ):
-    """Create a forecast-aware policy that waits for worthwhile improvements."""
+    """Create a forecast-aware window policy, optionally waiting for improvements."""
     if objective not in {"cost", "carbon", "joint"}:
         raise ValueError("objective must be 'cost', 'carbon', or 'joint'.")
     if not 0 <= w_cost <= 1:
@@ -212,7 +213,16 @@ def make_wait_policy(
 
     def wait_policy(job, current_hour: int, region_options, *, forecast):
         del job, region_options
+        if not allow_wait:
+            forecast = [
+                candidate for candidate in forecast
+                if candidate["start_hour"] == current_hour
+            ]
         if not forecast:
+            if not allow_wait:
+                raise ValueError(
+                    "No current-hour forecast candidate is available for this window policy."
+                )
             return "wait"
 
         if objective == "joint":
@@ -250,14 +260,18 @@ def make_wait_policy(
             key=score,
             default=None,
         )
-        best_future = min(
-            (
-                candidate
-                for candidate in forecast
-                if candidate["start_hour"] > current_hour
-            ),
-            key=score,
-            default=None,
+        best_future = (
+            min(
+                (
+                    candidate
+                    for candidate in forecast
+                    if candidate["start_hour"] > current_hour
+                ),
+                key=score,
+                default=None,
+            )
+            if allow_wait
+            else None
         )
 
         if best_now is None:
@@ -279,7 +293,9 @@ def make_wait_policy(
             "price_per_hr": best_now["price_per_hr"],
         }
 
-    wait_policy.__name__ = f"{objective}_wait_policy"
+    wait_policy.__name__ = (
+        f"{objective}_{'wait' if allow_wait else 'window'}_policy"
+    )
     wait_policy.needs_forecast = True
     return wait_policy
 
@@ -287,3 +303,6 @@ def make_wait_policy(
 cheapest_wait_policy = make_wait_policy("cost")
 cleanest_wait_policy = make_wait_policy("carbon")
 joint_wait_policy = make_wait_policy("joint")
+cheapest_window = make_wait_policy("cost", allow_wait=False)
+cleanest_window = make_wait_policy("carbon", allow_wait=False)
+joint_window = make_wait_policy("joint", allow_wait=False)

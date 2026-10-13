@@ -10,6 +10,9 @@ from scheduler.policies import (
     cleanest_wait_policy,
     joint_wait_policy,
     make_wait_policy,
+    cheapest_window,
+    cleanest_window,
+    joint_window,
 )
 from simulator.simulator import Simulator
 
@@ -140,6 +143,45 @@ def test_wait_policy_has_readable_name_and_rejects_unknown_objective():
         make_wait_policy("latency")
 
 
+@pytest.mark.parametrize(
+    "policy",
+    [cheapest_window, cleanest_window, joint_window],
+)
+def test_window_policies_never_wait(hand_trace_simulator, policy):
+    job = _forecast_job()
+    decision = policy(
+        job,
+        0,
+        hand_trace_simulator.get_region_options(0, job.job_type),
+        forecast=hand_trace_simulator.build_candidates(job, 0),
+    )
+    assert decision != "wait"
+
+
+def test_cheapest_wait_cost_is_no_more_than_window_cost(synthetic_results):
+    simulator, jobs = synthetic_results
+
+    window = simulator.run(jobs, cheapest_window).set_index("job_id")
+    waiting = simulator.run(jobs, cheapest_wait_policy).set_index("job_id")
+
+    for job in jobs:
+        assert waiting.loc[job.job_id, "cost_incurred"] <= (
+            window.loc[job.job_id, "cost_incurred"] + 1e-9
+        ), job.job_id
+
+
+def test_cleanest_wait_carbon_is_no_more_than_window_carbon(synthetic_results):
+    simulator, jobs = synthetic_results
+
+    window = simulator.run(jobs, cleanest_window).set_index("job_id")
+    waiting = simulator.run(jobs, cleanest_wait_policy).set_index("job_id")
+
+    for job in jobs:
+        assert waiting.loc[job.job_id, "carbon_emitted_g"] <= (
+            window.loc[job.job_id, "carbon_emitted_g"] + 1e-9
+        ), job.job_id
+
+
 @pytest.fixture
 def synthetic_results(tmp_path):
     _, carbon_df, price_df = generate_region_traces(
@@ -184,3 +226,12 @@ def test_cleanest_wait_never_emits_more_than_cleanest_first(synthetic_results):
         assert wait.loc[job.job_id, "carbon_emitted_g"] <= (
             first.loc[job.job_id, "carbon_emitted_g"] + 1e-9
         ), job.job_id
+
+
+def test_window_policy_raises_instead_of_waiting_without_current_candidate(
+    hand_trace_simulator,
+):
+    policy = make_wait_policy("cost", allow_wait=False)
+
+    with pytest.raises(ValueError, match="No current-hour forecast candidate"):
+        policy(_forecast_job(), 0, [], forecast=[])

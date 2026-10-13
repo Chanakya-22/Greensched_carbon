@@ -1,8 +1,10 @@
 import pandas as pd
 
 from metrics.slack_sweep import (
+    ABLATION_COLUMNS,
     FORECAST_ERROR_COLUMNS,
     SLACK_SWEEP_COLUMNS,
+    run_ablation,
     run_forecast_error_sweep,
     run_slack_sweep,
 )
@@ -25,6 +27,7 @@ def test_reduced_sweeps_write_expected_outputs_and_pass_deadlines(tmp_path):
     assert slack_results.columns.tolist() == SLACK_SWEEP_COLUMNS
     assert slack_results["slack"].unique().tolist() == [1, 2]
     assert slack_results["deadline_success_pct"].eq(100).all()
+    assert slack_results["policy"].nunique() == 10
 
     forecast_csv = tmp_path / "forecast-error.csv"
     forecast_png = tmp_path / "forecast-error.png"
@@ -42,3 +45,18 @@ def test_reduced_sweeps_write_expected_outputs_and_pass_deadlines(tmp_path):
     assert forecast_results.columns.tolist() == FORECAST_ERROR_COLUMNS
     assert forecast_results["forecast_error_std"].tolist() == [0, 0.2]
     assert pd.read_csv(forecast_csv).columns.tolist() == FORECAST_ERROR_COLUMNS
+    assert forecast_results.loc[0, "cost_diff_vs_sigma0_pct_mean"] == 0
+    assert forecast_results.loc[0, "carbon_diff_vs_sigma0_pct_mean"] == 0
+
+    ablation_csv = tmp_path / "ablation.csv"
+    ablation_png = tmp_path / "ablation.png"
+    ablation_results = run_ablation(
+        output_csv=ablation_csv,
+        output_png=ablation_png,
+        slacks=(1, 2),
+        num_jobs=8,
+        window_hours=12,
+    )
+    assert ablation_csv.exists()
+    assert ablation_png.exists()
+    assert ablation_results.columns.tolist() == ABLATION_COLUMNS
