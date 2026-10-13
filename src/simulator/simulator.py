@@ -369,7 +369,7 @@ class Simulator:
                     completion_hour = start_hour + job.duration_estimate_hours
                     
                     # Check deadline
-                    met_deadline = (completion_hour <= job.deadline)
+                    met_deadline = completion_hour <= job.deadline + 1e-9
                     
                     result = {
                         "job_id": job.job_id,

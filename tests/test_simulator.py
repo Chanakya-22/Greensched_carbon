@@ -15,6 +15,13 @@ def _wait_forever(_job, _current_hour, _region_options):
     return "wait"
 
 
+def _wait_until_latest_start(job, current_hour, region_options):
+    latest_start = int(job.deadline - job.duration_estimate_hours + 1e-9)
+    if current_hour < latest_start:
+        return "wait"
+    return region_options[0]
+
+
 @pytest.fixture
 def simulator_csvs(tmp_path):
     timestamps = pd.date_range("2024-01-01", periods=24, freq="h")
@@ -151,6 +158,24 @@ def test_start_immediately_policy_meets_each_deadline(simulator_csvs):
 
     assert len(results) == len(jobs)
     assert results["met_deadline"].all()
+
+
+def test_deadline_rounding_tolerance_accepts_latest_feasible_start(simulator_csvs):
+    duration = 0.9571817860738686
+    job = Job(
+        job_id="job-deadline-rounding",
+        job_type="cpu_openmp",
+        arrival_time=5,
+        deadline=5 + duration + 5,
+        duration_estimate_hours=duration,
+        resource_requirement=1,
+    )
+
+    result = simulator_csvs.run([job], _wait_until_latest_start).iloc[0]
+
+    assert result["completion_hour"] > job.deadline
+    assert result["completion_hour"] - job.deadline < 1e-9
+    assert result["met_deadline"]
 
 
 def test_wait_forever_marks_job_unscheduled_and_failed(simulator_csvs):
