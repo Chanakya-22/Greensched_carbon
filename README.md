@@ -44,8 +44,10 @@ remain synthetic and are separate from those pretrained model weights.
 
 ## Embedding benchmark
 
-Run `python -m models.benchmark` (with `src` on `PYTHONPATH`) to evaluate a
-registered OpenCLIP model. The runner first loads the Flickr30k 1K test
+Run `python -m models.benchmark --limit 100 --models vit_b_32_openai,vit_b_32_laion2b`
+(with `src` on `PYTHONPATH`) to compare registered OpenCLIP models; omitting
+`--models` selects all registry entries, and `--out-dir` controls the docs
+output directory. The runner first loads the Flickr30k 1K test
 retrieval benchmark from Hugging Face, using its `image` and `caption` fields
 and preserving dataset order. Cached benchmark data is stored under
 `data/benchmark/`, which is ignored by Git. If Flickr cannot be loaded, the
@@ -57,7 +59,11 @@ The benchmark also reports offline CodeCarbon energy estimates alongside
 measured wall-clock duration; component energy may be estimated from available
 hardware telemetry. Latency and peak GPU memory are available from
 `models.profiling`; GPU-specific hardware and memory fields are NaN without
-CUDA.
+CUDA. The comparison writes `model_comparison.csv`, `model_comparison.png`,
+`model_pareto.png`, and `model_selection.md`; per-model performance profiles
+are written to `data/profiles/gpu_model_profiles.json`. Models within one
+percentage point of the best mean recall@5 are tied, with energy per 1,000
+images used to choose among them.
 
 ## Policy comparison results
 

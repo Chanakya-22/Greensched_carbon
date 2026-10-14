@@ -123,19 +123,24 @@ def _nan_energy_result() -> dict[str, Any]:
     }
 
 
-def energy_profile(
+def run_with_energy_profile(
     model: Any,
-    images: Sequence[Any],
-    texts: Sequence[str],
-) -> dict[str, Any]:
-    """Estimate encoding energy offline; failures are logged and return NaNs."""
-    tracker = None
-    tracker_started = False
-    stopped = False
+    operation: Callable[[], Any],
+) -> tuple[Any, dict[str, Any]]:
+    """Run an operation once, returning its value and offline energy estimates."""
     try:
         from codecarbon import OfflineEmissionsTracker
+    except Exception:
+        logger.warning(
+            "Could not initialize CodeCarbon; energy values will be NaN.",
+            exc_info=True,
+        )
+        return operation(), _nan_energy_result()
 
-        with tempfile.TemporaryDirectory(prefix="greensched-codecarbon-") as output_dir:
+    with tempfile.TemporaryDirectory(prefix="greensched-codecarbon-") as output_dir:
+        tracker = None
+        started = False
+        try:
             tracker = OfflineEmissionsTracker(
                 output_dir=output_dir,
                 save_to_file=False,
@@ -144,12 +149,30 @@ def energy_profile(
                 log_level="error",
             )
             tracker.start()
-            tracker_started = True
-            started_at = time.perf_counter()
-            _encode_all(model, images, texts)
-            duration_s = time.perf_counter() - started_at
+            started = True
+        except Exception:
+            logger.warning(
+                "Could not start CodeCarbon; energy values will be NaN.",
+                exc_info=True,
+            )
+            return operation(), _nan_energy_result()
+
+        started_at = time.perf_counter()
+        try:
+            value = operation()
+        except Exception:
+            try:
+                tracker.stop()
+            except Exception:
+                logger.warning(
+                    "Could not stop CodeCarbon after the profiled operation failed.",
+                    exc_info=True,
+                )
+            raise
+
+        duration_s = time.perf_counter() - started_at
+        try:
             tracker.stop()
-            stopped = True
             data = tracker.final_emissions_data
             energy_kwh = float(data.energy_consumed)
             avg_power_w = (
@@ -160,25 +183,40 @@ def energy_profile(
             estimated = ["CPU energy", "RAM energy", "facility overhead (PUE)"]
             if torch.cuda.is_available():
                 estimated.append("GPU energy")
-            return {
+            energy = {
                 "energy_kwh": energy_kwh,
                 "duration_s": duration_s,
                 "avg_power_w": avg_power_w,
                 "components_measured": ["wall-clock duration"],
                 "components_estimated": estimated,
             }
+        except Exception:
+            logger.warning(
+                "Energy profiling failed; returning NaN energy measurements.",
+                exc_info=True,
+            )
+            energy = _nan_energy_result()
+            energy["duration_s"] = duration_s
+        return value, energy
+
+
+def energy_profile(
+    model: Any,
+    images: Sequence[Any],
+    texts: Sequence[str],
+) -> dict[str, Any]:
+    """Estimate encoding energy offline; failures are logged and return NaNs."""
+    try:
+        _, energy = run_with_energy_profile(
+            model, lambda: _encode_all(model, images, texts)
+        )
+        return energy
     except Exception:
-        logger.warning("Energy profiling failed; returning NaN measurements.", exc_info=True)
+        logger.warning(
+            "Energy profiling failed; returning NaN measurements.",
+            exc_info=True,
+        )
         return _nan_energy_result()
-    finally:
-        if tracker_started and not stopped and tracker is not None:
-            try:
-                tracker.stop()
-            except Exception:
-                logger.warning(
-                    "Could not stop the CodeCarbon tracker after profiling failed.",
-                    exc_info=True,
-                )
 
 
 def _open_clip_version() -> str:
@@ -242,4 +280,5 @@ __all__ = [
     "hardware_info",
     "latency_profile",
     "peak_gpu_memory_mb",
+    "run_with_energy_profile",
 ]
