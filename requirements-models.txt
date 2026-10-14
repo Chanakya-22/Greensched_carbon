@@ -4,6 +4,7 @@ open_clip_torch==3.3.0
 transformers
 faiss-cpu
 datasets==5.1.0
+huggingface-hub>=1.5.0,<2.0
 codecarbon==3.3.1
 pynvml==13.0.1
 pillow==12.3.0

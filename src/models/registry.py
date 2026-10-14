@@ -125,6 +125,10 @@ class EmbeddingModel:
         projection = getattr(self.model, "text_projection", None)
         if projection is not None and projection.ndim > 0:
             return int(projection.shape[-1])
+        text = getattr(self.model, "text", None)
+        output_dim = getattr(text, "output_dim", None)
+        if output_dim is not None:
+            return int(output_dim)
         embed_dim = getattr(self.model, "embed_dim", None)
         if embed_dim is not None:
             return int(embed_dim)

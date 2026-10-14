@@ -33,37 +33,107 @@ not committed to the repository. They are synthetic sample data, not real
 observed grid-carbon or electricity-price data; no real trace data is included
 in this project skeleton.
 
-## Embedding models
+## AI inference model selection
 
 Optional image/text embedding dependencies are listed in
 `requirements-models.txt`. Install them with
-`pip install -r requirements-models.txt`. The model registry uses published
-pretrained OpenCLIP weights; loading a model may download weights if they are
-not cached locally. The simulator's grid-carbon and electricity-price traces
-remain synthetic and are separate from those pretrained model weights.
+`pip install -r requirements-models.txt`. The registry uses published
+pretrained OpenCLIP weights; the first run downloads model weights that are
+not already cached. The simulator's grid-carbon and electricity-price traces
+remain synthetic and are separate from these model weights and the public
+benchmark images.
 
-## Embedding benchmark
+Run the full comparison from the repository root in PowerShell:
 
-Run `python -m models.benchmark --limit 100 --models vit_b_32_openai,vit_b_32_laion2b`
-(with `src` on `PYTHONPATH`) to compare registered OpenCLIP models; omitting
-`--models` selects all registry entries, and `--out-dir` controls the docs
-output directory. The runner first loads the Flickr30k 1K test
-retrieval benchmark from Hugging Face, using its `image` and `caption` fields
-and preserving dataset order. Cached benchmark data is stored under
-`data/benchmark/`, which is ignored by Git. If Flickr cannot be loaded, the
-runner explicitly reports the fallback to the first 2,000 CIFAR-100 test
-images and reports top-1/top-5 classification accuracy instead of retrieval
-recall. Flickr and CIFAR-100 are real public image benchmarks; they are not
-real grid-carbon or electricity-price measurements, which remain synthetic.
-The benchmark also reports offline CodeCarbon energy estimates alongside
-measured wall-clock duration; component energy may be estimated from available
-hardware telemetry. Latency and peak GPU memory are available from
-`models.profiling`; GPU-specific hardware and memory fields are NaN without
-CUDA. The comparison writes `model_comparison.csv`, `model_comparison.png`,
-`model_pareto.png`, and `model_selection.md`; per-model performance profiles
-are written to `data/profiles/gpu_model_profiles.json`. Models within one
-percentage point of the best mean recall@5 are tied, with energy per 1,000
-images used to choose among them.
+```powershell
+$env:PYTHONPATH = "src"
+python src/models/benchmark.py
+```
+
+The default run evaluates all four registered models on the full dataset.
+Use `--limit N`, `--models name1,name2`, and `--out-dir path` for smaller
+or targeted comparisons.
+
+### Dataset and metrics
+
+The comparison uses the Flickr30k 1K test image-text retrieval dataset
+(`nlphuji/flickr_1k_test_image_text_retrieval`): 1,000 images, each paired
+with five captions, evaluated in the dataset's fixed order. The loader uses
+the dataset's `image` and `caption` fields; when the current `datasets`
+package no longer accepts its loading script, it reads the dataset's published
+CSV and image archive directly. It falls back to CIFAR-100 classification
+only if neither retrieval loading path is available, and reports the dataset
+and task actually used in the benchmark output.
+
+Retrieval metrics are image-to-text recall@1/5/10 (a hit means any matching
+caption is retrieved), text-to-image recall@1/5/10, and their mean, with
+per-query bootstrap 95% confidence intervals. For the CIFAR-100 fallback,
+the runner reports top-1 and top-5 classification accuracy with bootstrap
+intervals instead. Performance measurements include median and IQR image
+encoding latency, images per second at batch sizes 1, 16, and 64, peak GPU
+memory, parameter count, embedding dimension, and offline energy per 1,000
+images.
+
+### Hardware and inference
+
+The full run was performed on Windows 11 with an Intel CPU and CPU-only
+PyTorch 2.13.0; no CUDA-capable GPU or GPU memory measurement was available.
+The CSV and profile JSON record hardware, PyTorch/OpenCLIP versions, and
+timestamp. Inference uses fp16 autocast on CUDA and fp32 on CPU. On this
+Windows host, CodeCarbon measured wall-clock duration and estimated CPU, RAM,
+and facility energy; the CSV and profile identify measured and estimated
+components separately.
+
+### Registered models
+
+- **ViT-B-32 OpenAI** (`vit_b_32_openai`): OpenAI-pretrained CLIP ViT-B/32.
+- **ViT-B-32 LAION-2B** (`vit_b_32_laion2b`): LAION-2B-pretrained CLIP
+  ViT-B/32.
+- **ViT-B-16-SigLIP WebLI** (`vit_b_16_siglip_webli`): SigLIP ViT-B/16
+  pretrained on WebLI.
+- **ConvNeXt-Base-W LAION-2B** (`convnext_base_w_laion2b`): LAION-2B-pretrained
+  ConvNeXt-Base-W image/text encoder.
+
+### Selection rule and results
+
+The winner is the model with the highest mean recall@5. Models within one
+percentage point of the best score are treated as tied; among tied models,
+the one with the lowest energy per 1,000 images wins. The next eligible model
+is the runner-up. Results below come from the full 1,000-image retrieval run;
+the CSV contains all metrics, confidence-interval bounds, dataset identity,
+and hardware details.
+
+| Model | Mean recall@5 (95% CI) | Images/s (batch 64) | Energy (kWh/1,000 images) | Parameters |
+| --- | ---: | ---: | ---: | ---: |
+| ViT-B-32 OpenAI | 0.8864 (0.8772–0.8951) | 75.74 | 0.002516 | 151.3M |
+| ViT-B-32 LAION-2B | 0.9227 (0.9153–0.9301) | 75.64 | 0.002408 | 151.3M |
+| ViT-B-16-SigLIP WebLI | 0.9515 (0.9460–0.9567) | 19.16 | 0.005004 | 203.2M |
+| ConvNeXt-Base-W LAION-2B | 0.9475 (0.9416–0.9530) | 12.65 | 0.005703 | 179.4M |
+
+**Winner:** ViT-B-16-SigLIP WebLI (`vit_b_16_siglip_webli`), with the highest
+mean recall@5. **Runner-up:** ConvNeXt-Base-W LAION-2B
+(`convnext_base_w_laion2b`). Both are within one percentage point of the best
+recall; the winner has lower estimated energy.
+
+The runner creates [the detailed comparison CSV](docs/model_comparison.csv),
+[the four-panel comparison chart](docs/model_comparison.png),
+[the recall/energy Pareto chart](docs/model_pareto.png), and
+[the generated selection summary](docs/model_selection.md). Per-model
+performance profiles are saved to
+`data/profiles/gpu_model_profiles.json`; cached benchmark data stays under
+`data/benchmark/` and is ignored by Git.
+
+### Limitations
+
+This is a single-dataset result on 1,000 Flickr30k test images, not evidence of
+general performance across image domains. Recall confidence intervals quantify
+query-sampling variability on this fixed dataset; they do not account for
+training-data overlap or dataset shift. On Windows, energy is partly estimated
+by CodeCarbon rather than measured directly, so energy comparisons are
+approximate. CUDA inference uses fp16 autocast, while CPU inference uses fp32;
+latency and energy results therefore depend on the selected hardware and
+precision path. The benchmark does not evaluate caption generation or
+cross-encoder reranking; see [model notes](docs/model_notes.md) for scope.
 
 ## Policy comparison results
 

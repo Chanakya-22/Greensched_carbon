@@ -1,13 +1,19 @@
 """Benchmark datasets for image/text retrieval and classification."""
 
+import csv
 from dataclasses import dataclass
+from io import BytesIO
+import json
 from pathlib import Path
 import warnings
+from zipfile import ZipFile
 
 from PIL import Image
 
 
 DATASET_ID = "nlphuji/flickr_1k_test_image_text_retrieval"
+FLICKR_ASSET_REPO_ID = "yonatanbitton/flickr_1k_test_image_text_retrieval"
+FLICKR_IMAGE_DIRECTORY = "images_flickr_1k_test"
 DEFAULT_CIFAR_LIMIT = 2000
 
 
@@ -69,13 +75,80 @@ def load_retrieval_set(limit: int | None = None) -> BenchmarkDataset:
             captions=captions,
         )
     except Exception as error:
-        warnings.warn(
-            f"Could not load {DATASET_ID} ({error!r}); using CIFAR-100 "
-            "classification fallback instead.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-        return _load_cifar100(limit, cache_root)
+        try:
+            warnings.warn(
+                f"Could not load {DATASET_ID} with datasets ({error!r}); "
+                "loading its published CSV and image archive directly.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return _load_flickr_artifacts(limit, cache_root)
+        except Exception as artifact_error:
+            warnings.warn(
+                f"Could not load {DATASET_ID} through datasets ({error!r}) "
+                f"or its published artifacts ({artifact_error!r}); using "
+                "CIFAR-100 classification fallback instead.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return _load_cifar100(limit, cache_root)
+
+
+def _load_flickr_artifacts(
+    limit: int | None,
+    cache_root: Path,
+) -> BenchmarkDataset:
+    from huggingface_hub import hf_hub_download
+
+    cache_dir = str(cache_root / "huggingface")
+    csv_path = hf_hub_download(
+        repo_id=FLICKR_ASSET_REPO_ID,
+        filename="test_1k_flickr.csv",
+        repo_type="dataset",
+        cache_dir=cache_dir,
+    )
+    archive_path = hf_hub_download(
+        repo_id=FLICKR_ASSET_REPO_ID,
+        filename=f"{FLICKR_IMAGE_DIRECTORY}.zip",
+        repo_type="dataset",
+        cache_dir=cache_dir,
+    )
+
+    images: list[Image.Image] = []
+    captions: list[list[str]] = []
+    with open(csv_path, newline="", encoding="utf-8") as csv_stream:
+        reader = csv.DictReader(csv_stream)
+        if reader.fieldnames is None or not {"filename", "raw"}.issubset(
+            reader.fieldnames
+        ):
+            raise ValueError(
+                "Flickr asset CSV must include filename and raw caption fields."
+            )
+        with ZipFile(archive_path) as archive:
+            for row in reader:
+                if limit is not None and len(images) >= limit:
+                    break
+                raw_captions = json.loads(row["raw"])
+                if not isinstance(raw_captions, list) or not raw_captions:
+                    raise ValueError(
+                        f"Flickr row {len(images)} has no caption list."
+                    )
+                member_name = (
+                    f"{FLICKR_IMAGE_DIRECTORY}/{row['filename']}"
+                )
+                with archive.open(member_name) as image_stream:
+                    image = Image.open(BytesIO(image_stream.read())).convert("RGB")
+                images.append(image)
+                captions.append([str(caption) for caption in raw_captions])
+
+    if limit != 0 and not images:
+        raise ValueError("Flickr asset archive contained no benchmark rows.")
+    return BenchmarkDataset(
+        name=DATASET_ID,
+        task="retrieval",
+        images=images,
+        captions=captions,
+    )
 
 
 def _load_cifar100(limit: int | None, cache_root: Path) -> BenchmarkDataset:

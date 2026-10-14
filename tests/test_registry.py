@@ -61,6 +61,21 @@ def test_fake_model_uses_embedding_model_interface():
     )
 
 
+def test_custom_text_clip_uses_text_encoder_embedding_dimension():
+    model = FakeModel()
+    del model.visual
+    model.text = type("TextEncoder", (), {"output_dim": 7})()
+
+    embedding_model = EmbeddingModel(
+        model,
+        preprocess=lambda image: torch.as_tensor(image, dtype=torch.float32),
+        tokenizer=lambda texts: torch.ones((len(texts), 1), dtype=torch.long),
+        device="cpu",
+    )
+
+    assert embedding_model.embedding_dim == 7
+
+
 @pytest.mark.slow
 def test_pretrained_model_produces_unit_norm_embeddings():
     model = EmbeddingModel.load(MODEL_SPECS[0], device="cpu")
