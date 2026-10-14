@@ -80,6 +80,7 @@ class Simulator:
         self.checkpoint_interval_h = checkpoint_interval_h
         self.max_spot_interruptions = max_spot_interruptions
         interruption_hazard = interruption_hazard or {}
+        self.interruption_hazard = dict(interruption_hazard)
         
         # Parse timestamps
         self.carbon_df["timestamp"] = pd.to_datetime(self.carbon_df["timestamp"])
@@ -486,12 +487,21 @@ class Simulator:
                             pending_job,
                             current_hour,
                         )
-                        decision = policy(
-                            pending_job,
-                            current_hour,
-                            region_options,
-                            forecast=candidates,
-                        )
+                        if getattr(policy, "needs_market_info", False) is True:
+                            decision = policy(
+                                pending_job,
+                                current_hour,
+                                region_options,
+                                forecast=candidates,
+                                hazards=self.interruption_hazard,
+                            )
+                        else:
+                            decision = policy(
+                                pending_job,
+                                current_hour,
+                                region_options,
+                                forecast=candidates,
+                            )
                     else:
                         decision = policy(
                             pending_job,
