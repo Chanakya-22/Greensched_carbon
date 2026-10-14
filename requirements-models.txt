@@ -1,6 +1,9 @@
-torch
-torchvision
-open_clip_torch
+torch==2.13.0
+torchvision==0.28.0
+open_clip_torch==3.3.0
 transformers
 faiss-cpu
-codecarbon
+datasets==5.1.0
+codecarbon==3.3.1
+pynvml==13.0.1
+pillow==12.3.0
