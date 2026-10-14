@@ -291,6 +291,7 @@ def make_wait_policy(
             "region": best_now["region"],
             "carbon_intensity": best_now["carbon_intensity"],
             "price_per_hr": best_now["price_per_hr"],
+            "market": best_now["market"],
         }
 
     wait_policy.__name__ = (

@@ -34,6 +34,8 @@ class Simulator:
         forecast_horizon_hours: int = 24,
         forecast_error_std: float = 0.0,
         forecast_seed: int = 0,
+        on_demand_multiplier: float = 2.5,
+        include_on_demand: bool = False,
     ):
         """
         Initialize simulator with carbon and price data.
@@ -45,17 +47,23 @@ class Simulator:
             forecast_horizon_hours: Maximum number of hours to consider future starts
             forecast_error_std: Standard deviation of log-normal forecast error
             forecast_seed: Seed used to generate reproducible forecast errors
+            on_demand_multiplier: Multiplier applied to mean spot prices
+            include_on_demand: Whether to offer on-demand options alongside spot
         """
         if forecast_horizon_hours < 0:
             raise ValueError("forecast_horizon_hours must be non-negative.")
         if forecast_error_std < 0:
             raise ValueError("forecast_error_std must be non-negative.")
+        if not math.isfinite(on_demand_multiplier) or on_demand_multiplier <= 0:
+            raise ValueError("on_demand_multiplier must be finite and positive.")
 
         self.carbon_df = pd.read_csv(carbon_csv_path)
         self.price_df = pd.read_csv(price_csv_path)
         self.resource_model = resource_model if resource_model is not None else ResourceModel()
         self.forecast_horizon_hours = forecast_horizon_hours
         self.forecast_error_std = forecast_error_std
+        self.on_demand_multiplier = on_demand_multiplier
+        self.include_on_demand = include_on_demand
         
         # Parse timestamps
         self.carbon_df["timestamp"] = pd.to_datetime(self.carbon_df["timestamp"])
@@ -75,10 +83,54 @@ class Simulator:
         # Index by region and hour for fast lookup
         self.carbon_index = self.carbon_df.set_index(["region", "hour"])
         self.price_index = self.price_df.set_index(["region", "hour"])
-        
+        self._on_demand_prices = {}
+        for region, prices in self.price_df.groupby("region"):
+            for job_type, column in (
+                ("cpu_openmp", "price_cpu_usd_hr"),
+                ("gpu_cuda", "price_gpu_usd_hr"),
+            ):
+                self._on_demand_prices[(region, job_type)] = (
+                    float(prices[column].mean()) * on_demand_multiplier
+                )
+
         self.results = []
         self.region_names = self.carbon_df["region"].unique().tolist()
         self._build_forecast_noise(forecast_seed)
+
+    @staticmethod
+    def _price_column(job_type: str) -> str:
+        return (
+            "price_cpu_usd_hr"
+            if job_type == "cpu_openmp"
+            else "price_gpu_usd_hr"
+        )
+
+    def _market_price(
+        self,
+        region: str,
+        job_type: str,
+        hour: int,
+        market: str,
+        spot_price: Optional[float] = None,
+    ) -> float:
+        """Return the trace price or fixed on-demand price for one market."""
+        if market == "on_demand":
+            return self._on_demand_prices[(region, job_type)]
+        if market != "spot":
+            raise ValueError(f"Unknown market '{market}'.")
+
+        if spot_price is None:
+            spot_price = float(
+                self.price_index.loc[
+                    (region, hour), self._price_column(job_type)
+                ]
+            )
+        if self.include_on_demand:
+            spot_price = min(
+                spot_price,
+                self._on_demand_prices[(region, job_type)],
+            )
+        return float(spot_price)
 
     def _build_forecast_noise(self, seed: int) -> None:
         """Create fixed multiplicative forecast errors for each trace point."""
@@ -106,6 +158,7 @@ class Simulator:
         start: int,
         duration: float,
         current_hour: int,
+        market: str,
     ) -> Tuple[float, float]:
         """Integrate forecast price and intensity over a proposed run window."""
         end = start + duration
@@ -122,9 +175,6 @@ class Simulator:
                 f"past the end of the available trace (hour {trace_end})."
             )
 
-        price_column = (
-            "price_cpu_usd_hr" if job_type == "cpu_openmp" else "price_gpu_usd_hr"
-        )
         price_integral = 0.0
         intensity_integral = 0.0
         final_hour = math.ceil(end)
@@ -134,7 +184,9 @@ class Simulator:
                 continue
             key = (region, hour)
             try:
-                price = float(self.price_index.loc[key, price_column])
+                spot_price = float(
+                    self.price_index.loc[key, self._price_column(job_type)]
+                )
                 intensity = float(
                     self.carbon_index.loc[key, "carbon_intensity_gco2_kwh"]
                 )
@@ -144,8 +196,15 @@ class Simulator:
                 ) from error
 
             if hour > current_hour:
-                price *= self._price_noise[key]
+                spot_price *= self._price_noise[key]
                 intensity *= self._carbon_noise[key]
+            price = self._market_price(
+                region,
+                job_type,
+                hour,
+                market,
+                spot_price,
+            )
             price_integral += overlap * price
             intensity_integral += overlap * intensity
 
@@ -160,21 +219,25 @@ class Simulator:
             current_hour + self.forecast_horizon_hours,
         )
         candidates = []
+        markets = ("spot", "on_demand") if self.include_on_demand else ("spot",)
         for region in self.region_names:
-            for start_hour in range(current_hour, final_start + 1):
-                price, intensity = self._integrate_forecast_window(
-                    region,
-                    job.job_type,
-                    start_hour,
-                    duration,
-                    current_hour,
-                )
-                candidates.append({
-                    "region": region,
-                    "start_hour": start_hour,
-                    "price_per_hr": price,
-                    "carbon_intensity": intensity,
-                })
+            for market in markets:
+                for start_hour in range(current_hour, final_start + 1):
+                    price, intensity = self._integrate_forecast_window(
+                        region,
+                        job.job_type,
+                        start_hour,
+                        duration,
+                        current_hour,
+                        market,
+                    )
+                    candidates.append({
+                        "region": region,
+                        "start_hour": start_hour,
+                        "price_per_hr": price,
+                        "carbon_intensity": intensity,
+                        "market": market,
+                    })
         return candidates
 
     def integrate_window(
@@ -183,6 +246,7 @@ class Simulator:
         job_type: str,
         start: float,
         duration: float,
+        market: str = "spot",
     ) -> Tuple[float, float]:
         """Integrate price and carbon intensity over a job's run window.
 
@@ -210,9 +274,6 @@ class Simulator:
                 f"past the end of the available trace (hour {trace_end})."
             )
 
-        price_column = (
-            "price_cpu_usd_hr" if job_type == "cpu_openmp" else "price_gpu_usd_hr"
-        )
         price_integral = 0.0
         intensity_integral = 0.0
         first_hour = int(start)
@@ -223,7 +284,11 @@ class Simulator:
             if overlap <= 0:
                 continue
             try:
-                price = self.price_index.loc[(region, hour), price_column]
+                spot_price = float(
+                    self.price_index.loc[
+                        (region, hour), self._price_column(job_type)
+                    ]
+                )
                 intensity = self.carbon_index.loc[
                     (region, hour), "carbon_intensity_gco2_kwh"
                 ]
@@ -231,7 +296,13 @@ class Simulator:
                 raise ValueError(
                     f"Missing hourly trace data for region '{region}' at hour {hour}."
                 ) from error
-            price_integral += overlap * float(price)
+            price_integral += overlap * self._market_price(
+                region,
+                job_type,
+                hour,
+                market,
+                spot_price,
+            )
             intensity_integral += overlap * float(intensity)
 
         return price_integral, intensity_integral
@@ -253,25 +324,33 @@ class Simulator:
         """
         options = []
         
+        markets = ("spot", "on_demand") if self.include_on_demand else ("spot",)
         for region in self.region_names:
             try:
                 # Get carbon intensity
                 carbon = self.carbon_index.loc[(region, current_hour), "carbon_intensity_gco2_kwh"]
-                
-                # Get appropriate price
-                if job_type == "cpu_openmp":
-                    price = self.price_index.loc[(region, current_hour), "price_cpu_usd_hr"]
-                else:  # gpu_cuda
-                    price = self.price_index.loc[(region, current_hour), "price_gpu_usd_hr"]
-                
+                spot_price = float(
+                    self.price_index.loc[
+                        (region, current_hour), self._price_column(job_type)
+                    ]
+                )
+            except KeyError:
+                # Region/hour combination not available
+                continue
+
+            for market in markets:
                 options.append({
                     "region": region,
                     "carbon_intensity": float(carbon),
-                    "price_per_hr": float(price),
+                    "price_per_hr": self._market_price(
+                        region,
+                        job_type,
+                        current_hour,
+                        market,
+                        spot_price,
+                    ),
+                    "market": market,
                 })
-            except KeyError:
-                # Region/hour combination not available
-                pass
         
         return options
     
@@ -345,6 +424,7 @@ class Simulator:
                         job.job_type,
                         start_hour,
                         job.duration_estimate_hours,
+                        market=region_dict.get("market", "spot"),
                     )
                     if job.job_type == "cpu_openmp":
                         units = (
