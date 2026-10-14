@@ -53,6 +53,11 @@ runner explicitly reports the fallback to the first 2,000 CIFAR-100 test
 images and reports top-1/top-5 classification accuracy instead of retrieval
 recall. Flickr and CIFAR-100 are real public image benchmarks; they are not
 real grid-carbon or electricity-price measurements, which remain synthetic.
+The benchmark also reports offline CodeCarbon energy estimates alongside
+measured wall-clock duration; component energy may be estimated from available
+hardware telemetry. Latency and peak GPU memory are available from
+`models.profiling`; GPU-specific hardware and memory fields are NaN without
+CUDA.
 
 ## Policy comparison results
 

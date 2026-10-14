@@ -7,6 +7,7 @@ import torch
 
 from models.data import BenchmarkDataset, load_retrieval_set
 from models.metrics import classification_topk, retrieval_metrics
+from models.profiling import energy_profile
 from models.registry import MODEL_REGISTRY, EmbeddingModel
 
 
@@ -54,23 +55,30 @@ def evaluate_model(
         text_embeddings = _encode_batches(
             model, flat_captions, batch_size=batch_size, encode="texts"
         )
-        return retrieval_metrics(
+        results = retrieval_metrics(
             image_embeddings,
             text_embeddings,
             caption_image_ids,
         )
-
-    if dataset.task == "classification":
+        results["energy_profile"] = energy_profile(
+            model, dataset.images, flat_captions
+        )
+        return results
+    elif dataset.task == "classification":
         if dataset.class_prompts is None or dataset.labels is None:
             raise ValueError("Classification dataset lacks prompts or labels")
         class_embeddings = _encode_batches(
             model, dataset.class_prompts, batch_size=batch_size, encode="texts"
         )
-        return classification_topk(
+        results = classification_topk(
             image_embeddings, class_embeddings, dataset.labels, ks=(1, 5)
         )
-
-    raise ValueError(f"Unsupported benchmark task: {dataset.task}")
+        results["energy_profile"] = energy_profile(
+            model, dataset.images, dataset.class_prompts
+        )
+        return results
+    else:
+        raise ValueError(f"Unsupported benchmark task: {dataset.task}")
 
 
 def main() -> None:
