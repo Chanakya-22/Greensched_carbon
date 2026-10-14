@@ -8,6 +8,11 @@ from metrics.slack_sweep import (
     run_forecast_error_sweep,
     run_slack_sweep,
 )
+from metrics.spot_experiments import (
+    SUMMARY_COLUMNS as SPOT_SUMMARY_COLUMNS,
+    run_spot_hazard_sweep,
+    run_spot_multiplier_sweep,
+)
 
 
 def test_reduced_sweeps_write_expected_outputs_and_pass_deadlines(tmp_path):
@@ -60,3 +65,41 @@ def test_reduced_sweeps_write_expected_outputs_and_pass_deadlines(tmp_path):
     assert ablation_csv.exists()
     assert ablation_png.exists()
     assert ablation_results.columns.tolist() == ABLATION_COLUMNS
+
+
+def test_reduced_spot_experiments_write_expected_outputs(tmp_path):
+    hazard_csv = tmp_path / "spot-hazard.csv"
+    hazard_png = tmp_path / "spot-hazard.png"
+    hazard_results = run_spot_hazard_sweep(
+        output_csv=hazard_csv,
+        output_png=hazard_png,
+        hazards=(0, 0.05),
+        seeds=(42, 43),
+        num_jobs=6,
+        window_hours=12,
+    )
+
+    assert hazard_csv.exists()
+    assert hazard_png.exists()
+    assert hazard_results.columns.tolist() == SPOT_SUMMARY_COLUMNS
+    assert pd.read_csv(hazard_csv).columns.tolist() == SPOT_SUMMARY_COLUMNS
+    assert hazard_results["parameter"].unique().tolist() == [0, 0.05]
+    assert hazard_results["policy"].nunique() == 4
+
+    multiplier_csv = tmp_path / "spot-multiplier.csv"
+    multiplier_png = tmp_path / "spot-multiplier.png"
+    multiplier_results = run_spot_multiplier_sweep(
+        output_csv=multiplier_csv,
+        output_png=multiplier_png,
+        multipliers=(1.5, 2.5),
+        seeds=(42, 43),
+        num_jobs=6,
+        window_hours=12,
+    )
+
+    assert multiplier_csv.exists()
+    assert multiplier_png.exists()
+    assert multiplier_results.columns.tolist() == SPOT_SUMMARY_COLUMNS
+    assert pd.read_csv(multiplier_csv).columns.tolist() == SPOT_SUMMARY_COLUMNS
+    assert multiplier_results["parameter"].unique().tolist() == [1.5, 2.5]
+    assert multiplier_results["policy"].nunique() == 4

@@ -58,6 +58,7 @@ def test_zero_error_candidates_equal_true_duration_weighted_averages(
             "start_hour": start,
             "price_per_hr": pytest.approx(start + 1.5),
             "carbon_intensity": pytest.approx(100 * (start + 1.5)),
+            "market": "spot",
         }
         for start in range(1, 5)
     ]
