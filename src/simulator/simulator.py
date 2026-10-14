@@ -10,6 +10,7 @@ import math
 import numpy as np
 import pandas as pd
 from typing import Callable, List, Dict, Optional, Tuple
+from jobs.job import Job
 
 
 @dataclass
@@ -36,6 +37,10 @@ class Simulator:
         forecast_seed: int = 0,
         on_demand_multiplier: float = 2.5,
         include_on_demand: bool = False,
+        interruption_hazard: Optional[Dict[str, float]] = None,
+        checkpoint_interval_h: float = 1.0,
+        max_spot_interruptions: int = 3,
+        interruption_seed: int = 0,
     ):
         """
         Initialize simulator with carbon and price data.
@@ -49,6 +54,10 @@ class Simulator:
             forecast_seed: Seed used to generate reproducible forecast errors
             on_demand_multiplier: Multiplier applied to mean spot prices
             include_on_demand: Whether to offer on-demand options alongside spot
+            interruption_hazard: Per-region probability of reclaiming a spot slot
+            checkpoint_interval_h: Work interval between durable checkpoints
+            max_spot_interruptions: Interruptions before forcing on-demand
+            interruption_seed: Seed used to sample spot slot reclaims
         """
         if forecast_horizon_hours < 0:
             raise ValueError("forecast_horizon_hours must be non-negative.")
@@ -56,6 +65,10 @@ class Simulator:
             raise ValueError("forecast_error_std must be non-negative.")
         if not math.isfinite(on_demand_multiplier) or on_demand_multiplier <= 0:
             raise ValueError("on_demand_multiplier must be finite and positive.")
+        if not math.isfinite(checkpoint_interval_h) or checkpoint_interval_h <= 0:
+            raise ValueError("checkpoint_interval_h must be finite and positive.")
+        if not isinstance(max_spot_interruptions, int) or max_spot_interruptions < 0:
+            raise ValueError("max_spot_interruptions must be a non-negative integer.")
 
         self.carbon_df = pd.read_csv(carbon_csv_path)
         self.price_df = pd.read_csv(price_csv_path)
@@ -64,6 +77,9 @@ class Simulator:
         self.forecast_error_std = forecast_error_std
         self.on_demand_multiplier = on_demand_multiplier
         self.include_on_demand = include_on_demand
+        self.checkpoint_interval_h = checkpoint_interval_h
+        self.max_spot_interruptions = max_spot_interruptions
+        interruption_hazard = interruption_hazard or {}
         
         # Parse timestamps
         self.carbon_df["timestamp"] = pd.to_datetime(self.carbon_df["timestamp"])
@@ -83,6 +99,23 @@ class Simulator:
         # Index by region and hour for fast lookup
         self.carbon_index = self.carbon_df.set_index(["region", "hour"])
         self.price_index = self.price_df.set_index(["region", "hour"])
+        self.region_names = self.carbon_df["region"].unique().tolist()
+        unknown_regions = set(interruption_hazard) - set(self.region_names)
+        if unknown_regions:
+            raise ValueError(
+                "interruption_hazard contains unknown regions: "
+                + ", ".join(sorted(unknown_regions))
+            )
+        for region, hazard in interruption_hazard.items():
+            if not math.isfinite(hazard) or not 0 <= hazard <= 1:
+                raise ValueError(
+                    f"Interruption hazard for region '{region}' must be between 0 and 1."
+                )
+        reclaim_rng = np.random.default_rng(interruption_seed)
+        self.reclaim = {
+            key: bool(reclaim_rng.random() < interruption_hazard.get(key[0], 0.0))
+            for key in self.price_index.index
+        }
         self._on_demand_prices = {}
         for region, prices in self.price_df.groupby("region"):
             for job_type, column in (
@@ -92,9 +125,8 @@ class Simulator:
                 self._on_demand_prices[(region, job_type)] = (
                     float(prices[column].mean()) * on_demand_multiplier
                 )
-
         self.results = []
-        self.region_names = self.carbon_df["region"].unique().tolist()
+        self.results = []
         self._build_forecast_noise(forecast_seed)
 
     @staticmethod
@@ -371,119 +403,225 @@ class Simulator:
             DataFrame with job results
         """
         self.results = []
-        
-        # Track which jobs have been scheduled
-        scheduled = {}  # job_id -> result dict
-        unscheduled = {job.job_id: job for job in jobs}
-        
-        # Determine simulation time window
-        max_deadline = max(job.deadline for job in jobs)
-        max_hour = int(max_deadline) + 1
-        
-        # Step through simulation time
-        for current_hour in range(max_hour):
-            # Process unscheduled jobs that have arrived
-            jobs_to_process = []
-            for job_id, job in list(unscheduled.items()):
-                if job.arrival_time <= current_hour:
-                    jobs_to_process.append((job_id, job))
-            
-            # Call policy for each arrived job
-            for job_id, job in jobs_to_process:
-                # Get region options for this job type
-                region_options = self.get_region_options(current_hour, job.job_type)
-                
-                if not region_options:
-                    continue  # No regions available
-                
-                # Only forecast-aware policies receive the look-ahead candidates.
-                uses_forecast = getattr(policy, "needs_forecast", False) is True
-                if uses_forecast:
-                    candidates = self.build_candidates(job, current_hour)
-                    decision = policy(
-                        job,
-                        current_hour,
-                        region_options,
-                        forecast=candidates,
-                    )
-                else:
-                    decision = policy(job, current_hour, region_options)
-                
-                if decision != "wait" and decision is not None:
-                    # Schedule this job
-                    region_dict = decision
-                    region_name = region_dict["region"]
-                    start_hour = (
-                        region_dict.get("start_hour", current_hour)
-                        if uses_forecast
-                        else current_hour
-                    )
 
+        if not jobs:
+            return pd.DataFrame()
+
+        states = {
+            job.job_id: {
+                "job": job,
+                "remaining": job.duration_estimate_hours,
+                "ready_hour": math.ceil(job.arrival_time),
+                "pending_arrival": job.arrival_time,
+                "started": False,
+                "start_hour": None,
+                "completion_hour": None,
+                "region": None,
+                "market": None,
+                "interruptions": 0,
+                "wasted_hours": 0.0,
+                "wasted_cost": 0.0,
+                "wasted_carbon_g": 0.0,
+                "cost": 0.0,
+                "carbon": 0.0,
+                "forced_region": None,
+            }
+            for job in jobs
+        }
+        final_hour = max(math.floor(job.deadline) for job in jobs)
+        max_hour = final_hour + 1
+
+        current_hour = 0
+        while current_hour < max_hour:
+            for state in states.values():
+                job = state["job"]
+                if (
+                    state["completion_hour"] is not None
+                    or state["ready_hour"] > current_hour
+                    or (not state["started"] and current_hour > job.deadline)
+                ):
+                    continue
+
+                pending_job = Job(
+                    job_id=job.job_id,
+                    job_type=job.job_type,
+                    arrival_time=state["pending_arrival"],
+                    deadline=job.deadline,
+                    duration_estimate_hours=state["remaining"],
+                    resource_requirement=job.resource_requirement,
+                )
+                region_options = self.get_region_options(
+                    current_hour,
+                    pending_job.job_type,
+                )
+                force_on_demand = (
+                    state["interruptions"] >= self.max_spot_interruptions
+                    and state["forced_region"] is not None
+                )
+                if force_on_demand:
+                    forced_region = state["forced_region"]
+                    if (forced_region, current_hour) not in self.carbon_index.index:
+                        continue
+                    region_options = [{
+                        "region": forced_region,
+                        "carbon_intensity": float(
+                            self.carbon_index.loc[
+                                (forced_region, current_hour),
+                                "carbon_intensity_gco2_kwh",
+                            ]
+                        ),
+                        "price_per_hr": self._on_demand_prices[
+                            (forced_region, pending_job.job_type)
+                        ],
+                        "market": "on_demand",
+                    }]
+                    region_dict = region_options[0]
+                    uses_forecast = False
+                else:
+                    if not region_options:
+                        continue
+                    uses_forecast = getattr(policy, "needs_forecast", False) is True
+                    if uses_forecast:
+                        candidates = self.build_candidates(
+                            pending_job,
+                            current_hour,
+                        )
+                        decision = policy(
+                            pending_job,
+                            current_hour,
+                            region_options,
+                            forecast=candidates,
+                        )
+                    else:
+                        decision = policy(
+                            pending_job,
+                            current_hour,
+                            region_options,
+                        )
+                    if decision == "wait" or decision is None:
+                        continue
+                    region_dict = decision
+
+                region_name = region_dict["region"]
+                market = region_dict.get("market", "spot")
+                start_hour = (
+                    region_dict.get("start_hour", current_hour)
+                    if uses_forecast
+                    else current_hour
+                )
+                if not state["started"]:
+                    state["started"] = True
+                    state["start_hour"] = start_hour
+
+                duration = state["remaining"]
+                reclaim_hour = None
+                if market == "spot":
+                    run_end = start_hour + duration
+                    reclaim_hour = next(
+                        (
+                            hour
+                            for hour in range(
+                                math.floor(start_hour),
+                                math.ceil(run_end),
+                            )
+                            if hour >= start_hour
+                            and hour < run_end
+                            and self.reclaim.get((region_name, hour), False)
+                        ),
+                        None,
+                    )
+                run_duration = (
+                    reclaim_hour - start_hour
+                    if reclaim_hour is not None
+                    else duration
+                )
+                if run_duration > 0:
                     price_integral, intensity_integral = self.integrate_window(
                         region_name,
-                        job.job_type,
+                        pending_job.job_type,
                         start_hour,
-                        job.duration_estimate_hours,
-                        market=region_dict.get("market", "spot"),
+                        run_duration,
+                        market=market,
                     )
-                    if job.job_type == "cpu_openmp":
+                    if pending_job.job_type == "cpu_openmp":
                         units = (
-                            job.resource_requirement
+                            pending_job.resource_requirement
                             / self.resource_model.cpu_cores_per_instance
                         )
                         power_kw = (
-                            job.resource_requirement
+                            pending_job.resource_requirement
                             * self.resource_model.cpu_power_per_core_kw
                         )
-                    else:  # gpu_cuda
-                        units = job.resource_requirement
+                    else:
+                        units = pending_job.resource_requirement
                         power_kw = (
-                            job.resource_requirement
+                            pending_job.resource_requirement
                             * self.resource_model.gpu_power_per_gpu_kw
                         )
+                    state["cost"] += units * price_integral
+                    state["carbon"] += power_kw * intensity_integral
 
-                    cost_incurred = units * price_integral
-                    carbon_emitted = power_kw * intensity_integral
-                    
-                    # Completion hour
-                    completion_hour = start_hour + job.duration_estimate_hours
-                    
-                    # Check deadline
-                    met_deadline = completion_hour <= job.deadline + 1e-9
-                    
-                    result = {
-                        "job_id": job.job_id,
-                        "job_type": job.job_type,
-                        "region_used": region_name,
-                        "start_hour": start_hour,
-                        "wait_hours": start_hour - job.arrival_time,
-                        "completion_hour": completion_hour,
-                        "met_deadline": met_deadline,
-                        "cost_incurred": cost_incurred,
-                        "carbon_emitted_g": carbon_emitted,
-                    }
-                    
-                    scheduled[job_id] = result
-                    del unscheduled[job_id]
-        
-        # Add scheduled jobs to results
-        for job_id in scheduled:
-            self.results.append(scheduled[job_id])
-        
-        # Handle any remaining unscheduled jobs (mark as failed)
-        for job_id, job in unscheduled.items():
+                state["region"] = region_name
+                state["market"] = market
+                if reclaim_hour is None:
+                    state["completion_hour"] = start_hour + duration
+                    state["remaining"] = 0.0
+                    continue
+
+                kept_progress = min(
+                    duration,
+                    math.floor(
+                        run_duration / self.checkpoint_interval_h + 1e-12
+                    ) * self.checkpoint_interval_h,
+                )
+                wasted_hours = run_duration - kept_progress
+                if wasted_hours > 0:
+                    waste_start = start_hour + kept_progress
+                    waste_price, waste_intensity = self.integrate_window(
+                        region_name,
+                        pending_job.job_type,
+                        waste_start,
+                        wasted_hours,
+                        market=market,
+                    )
+                    state["wasted_cost"] += units * waste_price
+                    state["wasted_carbon_g"] += power_kw * waste_intensity
+                state["wasted_hours"] += wasted_hours
+                state["remaining"] = duration - kept_progress
+                state["interruptions"] += 1
+                state["forced_region"] = region_name
+                state["pending_arrival"] = reclaim_hour
+                state["ready_hour"] = reclaim_hour + 1
+                max_hour = max(max_hour, reclaim_hour + 2)
+            current_hour += 1
+
+        for state in states.values():
+            job = state["job"]
+            completion_hour = state["completion_hour"]
             self.results.append({
-                "job_id": job_id,
+                "job_id": job.job_id,
                 "job_type": job.job_type,
-                "region_used": None,
-                "start_hour": None,
-                "wait_hours": None,
-                "completion_hour": None,
-                "met_deadline": False,
-                "cost_incurred": 0.0,
-                "carbon_emitted_g": 0.0,
+                "region_used": state["region"],
+                "start_hour": state["start_hour"],
+                "wait_hours": (
+                    state["start_hour"] - job.arrival_time
+                    if state["start_hour"] is not None
+                    else None
+                ),
+                "completion_hour": completion_hour,
+                "met_deadline": (
+                    completion_hour is not None
+                    and completion_hour <= job.deadline + 1e-9
+                ),
+                "cost_incurred": state["cost"],
+                "carbon_emitted_g": state["carbon"],
+                "interruptions": state["interruptions"],
+                "wasted_hours": state["wasted_hours"],
+                "wasted_cost": state["wasted_cost"],
+                "wasted_carbon_g": state["wasted_carbon_g"],
+                "final_market": state["market"],
             })
-        
+
         results_df = pd.DataFrame(self.results)
         return results_df
 
