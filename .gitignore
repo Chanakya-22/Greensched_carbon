@@ -10,6 +10,7 @@ env/
 # Raw trace data
 data/carbon_traces/*.csv
 data/price_traces/*.csv
+data/benchmark/
 
 # Local planning artifacts
 phase_plan/
