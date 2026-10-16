@@ -148,12 +148,22 @@ def test_multi_model_runner_writes_outputs_and_continues_after_model_error(
     assert (out_dir / benchmark.SELECTION_NAME).exists()
 
     profiles = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert profiles["device"] == "cpu"
     assert profiles["models"]["fake-good"]["avg_power_w"] == 0.72
+    assert profiles["models"]["fake-good"]["device"] == "cpu"
+    assert (
+        profiles["models"]["fake-good"]["energy_method"]
+        == "estimated_from_runtime"
+    )
     assert profiles["models"]["fake-good"]["img_per_s_at_batch_64"] == 1000 / 64
     assert profiles["hardware"]["gpu_name"] is None
     selection = (out_dir / benchmark.SELECTION_NAME).read_text(encoding="utf-8")
     assert "**Winner:** fake-good" in selection
     assert "**Runner-up:** fake-good-2" in selection
+    assert "- Device: cpu" in selection
+    assert "- Dataset: synthetic benchmark fixture (images: 3)" in selection
+    assert "- Energy method: estimated_from_runtime (PUE: 1.0)" in selection
+    assert "runtime proxy" in selection
 
     console = capsys.readouterr().out
     assert "Failed fake-broken: RuntimeError: injected model failure" in console

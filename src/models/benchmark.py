@@ -6,7 +6,10 @@ import json
 import logging
 import math
 from pathlib import Path
+import sys
 from typing import Any, Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import matplotlib
 
@@ -119,12 +122,13 @@ def _empty_result(
     model_name: str,
     dataset: BenchmarkDataset,
     hardware: dict[str, Any],
+    device: str = "cpu",
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "model": model_name,
         "dataset": dataset.name,
         "task": dataset.task,
-        "device": "cpu",
+        "device": device,
         "n_images": len(dataset.images),
         "n_texts": sum(len(captions) for captions in dataset.captions)
         if dataset.task == "retrieval"
@@ -173,7 +177,7 @@ def _profile_one_model(
     device: str,
     model_loader: Callable[[str, str], Any],
 ) -> dict[str, Any]:
-    row = _empty_result(model_name, dataset, hardware)
+    row = _empty_result(model_name, dataset, hardware, device)
     model = None
     try:
         print(f"Loading model: {model_name}", flush=True)
@@ -311,6 +315,15 @@ def _plot_comparison(frame: pd.DataFrame, output_path: Path) -> None:
         axis.bar(frame.loc[valid, "model"], values[valid])
         axis.set_title(title)
         axis.set_ylabel(ylabel)
+        if not valid.any():
+            axis.text(
+                0.5,
+                0.5,
+                "not available (CPU run)",
+                ha="center",
+                va="center",
+                transform=axis.transAxes,
+            )
         axis.tick_params(axis="x", labelrotation=30)
         for label in axis.get_xticklabels():
             label.set_ha("right")
@@ -337,7 +350,10 @@ def _plot_pareto(frame: pd.DataFrame, output_path: Path) -> None:
             xytext=(5, 4),
             textcoords="offset points",
         )
-    axis.set_xlabel("Energy per 1,000 images (kWh)")
+    method = ", ".join(
+        sorted({str(m) for m in frame["energy_method"].dropna()})
+    )
+    axis.set_xlabel(f"Energy per 1,000 images (kWh; {method})")
     axis.set_ylabel("Mean recall@5")
     axis.set_title("Model retrieval-quality / energy comparison")
     figure.tight_layout()
@@ -381,6 +397,28 @@ def _write_selection(frame: pd.DataFrame, path: Path) -> tuple[str | None, str |
             for value in values
         ]
         markdown_rows.append("| " + " | ".join(markdown_values) + " |")
+
+    def _unique(column: str) -> str:
+        if column not in frame.columns:
+            return "unknown"
+        values = sorted({str(value) for value in frame[column].dropna()})
+        return ", ".join(values) if values else "unknown"
+
+    estimated = "estimated_from_runtime" in _unique("energy_method")
+    run_conditions = [
+        "## Run conditions",
+        "",
+        f"- Device: {_unique('device')}",
+        f"- Dataset: {_unique('dataset')} (images: {_unique('n_images')})",
+        f"- Energy method: {_unique('energy_method')} (PUE: {_unique('pue')})",
+        (
+            "- Energy is estimated from wall-clock runtime, not read from a power "
+            "sensor; treat it as a runtime proxy."
+            if estimated
+            else "- Energy was measured by codecarbon where components are listed as measured."
+        ),
+        "",
+    ]
     lines = [
         "# Model selection",
         "",
@@ -388,6 +426,7 @@ def _write_selection(frame: pd.DataFrame, path: Path) -> tuple[str | None, str |
         "",
         *markdown_rows,
         "",
+        *run_conditions,
         "## Selection rule",
         "",
         "Choose the model with the highest mean recall@5. Models within "
@@ -481,6 +520,8 @@ def run_comparison(
     profiles: dict[str, Any] = {}
     for _, row in frame.iterrows():
         profiles[row["model"]] = {
+            "device": row["device"],
+            "energy_method": row["energy_method"],
             "avg_power_w": row["avg_power_w"],
             "img_per_s_at_batch_64": row["images_per_s_b64"],
             "kwh_per_1000_images": row["energy_per_1000_images_kwh"],
@@ -489,7 +530,13 @@ def run_comparison(
     profile_file.parent.mkdir(parents=True, exist_ok=True)
     profile_file.write_text(
         json.dumps(
-            _json_safe({"models": profiles, "hardware": hardware}),
+            _json_safe(
+                {
+                    "device": selected_device,
+                    "models": profiles,
+                    "hardware": hardware,
+                }
+            ),
             indent=2,
             allow_nan=False,
         )
