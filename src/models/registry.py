@@ -19,9 +19,9 @@ class ModelSpec:
 MODEL_SPECS = (
     ModelSpec(
         name="vit_b_32_openai",
-        arch="ViT-B-32",
+        arch="ViT-B-32-quickgelu",
         pretrained="openai",
-        notes="OpenAI pretrained ViT-B-32.",
+        notes="OpenAI pretrained ViT-B-32 with QuickGELU.",
     ),
     ModelSpec(
         name="vit_b_32_laion2b",

@@ -118,9 +118,24 @@ def _nan_energy_result() -> dict[str, Any]:
         "energy_kwh": math.nan,
         "duration_s": math.nan,
         "avg_power_w": math.nan,
+        "pue": 1.0,
+        "energy_method": "estimated_from_runtime",
         "components_measured": [],
         "components_estimated": [],
     }
+
+
+def _energy_method_from_codecarbon(data: Any) -> str:
+    raw = getattr(data, "energy_method", None)
+    if raw in {"measured", "estimated_from_runtime"}:
+        return str(raw)
+    if raw is not None:
+        value = str(raw).strip().lower()
+        if value in {"measured", "estimated_from_runtime"}:
+            return value
+    if getattr(data, "power", None) is not None or getattr(data, "power_consumed", None) is not None:
+        return "measured"
+    return "estimated_from_runtime"
 
 
 def run_with_energy_profile(
@@ -147,6 +162,7 @@ def run_with_energy_profile(
                 save_to_api=False,
                 save_to_logger=False,
                 log_level="error",
+                pue=1.0,
             )
             tracker.start()
             started = True
@@ -183,10 +199,13 @@ def run_with_energy_profile(
             estimated = ["CPU energy", "RAM energy", "facility overhead (PUE)"]
             if torch.cuda.is_available():
                 estimated.append("GPU energy")
+            energy_method = _energy_method_from_codecarbon(data)
             energy = {
                 "energy_kwh": energy_kwh,
                 "duration_s": duration_s,
                 "avg_power_w": avg_power_w,
+                "pue": 1.0,
+                "energy_method": energy_method,
                 "components_measured": ["wall-clock duration"],
                 "components_estimated": estimated,
             }

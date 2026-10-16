@@ -124,6 +124,7 @@ def _empty_result(
         "model": model_name,
         "dataset": dataset.name,
         "task": dataset.task,
+        "device": "cpu",
         "n_images": len(dataset.images),
         "n_texts": sum(len(captions) for captions in dataset.captions)
         if dataset.task == "retrieval"
@@ -134,6 +135,8 @@ def _empty_result(
         "energy_kwh": math.nan,
         "energy_per_1000_images_kwh": math.nan,
         "avg_power_w": math.nan,
+        "pue": 1.0,
+        "energy_method": "estimated_from_runtime",
         "components_measured": "",
         "components_estimated": "",
         "error": "",
@@ -185,8 +188,11 @@ def _profile_one_model(
         (image_embeddings, text_embeddings), energy = run_with_energy_profile(
             model, encode_evaluation_set
         )
+        row["device"] = device
         row["energy_kwh"] = energy["energy_kwh"]
         row["avg_power_w"] = energy["avg_power_w"]
+        row["pue"] = energy.get("pue", 1.0)
+        row["energy_method"] = energy.get("energy_method", "estimated_from_runtime")
         row["components_measured"] = "; ".join(energy["components_measured"])
         row["components_estimated"] = "; ".join(energy["components_estimated"])
         if math.isfinite(row["energy_kwh"]) and row["n_images"]:
@@ -426,6 +432,7 @@ def run_comparison(
     dataset: BenchmarkDataset | None = None,
     model_loader: Callable[[str, str], Any] | None = None,
     profile_path: str | Path = PROFILE_PATH,
+    allow_cpu: bool = False,
 ) -> pd.DataFrame:
     """Evaluate each model independently and write comparison artifacts."""
     if not model_names:
@@ -436,6 +443,16 @@ def run_comparison(
     if limit is not None and limit < 1:
         raise ValueError("limit must be positive")
     selected_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    if selected_device.lower() == "cpu" and not allow_cpu:
+        raise ValueError(
+            "CPU benchmarking is disabled. Pass --allow-cpu to run on CPU; "
+            "GPU fields will be empty."
+        )
+    if selected_device.lower() == "cpu":
+        print(
+            "WARNING: Benchmarking on CPU via --allow-cpu; GPU fields are empty.",
+            flush=True,
+        )
     chosen_dataset = dataset or load_retrieval_set(limit=limit)
     print(
         f"Benchmark dataset: {chosen_dataset.name} "
@@ -502,10 +519,23 @@ def main(argv: list[str] | None = None) -> None:
         "--device",
         default="cuda" if torch.cuda.is_available() else "cpu",
     )
+    parser.add_argument(
+        "--allow-cpu",
+        action="store_true",
+        help="Allow the benchmark to run on CPU and record device=cpu.",
+    )
     args = parser.parse_args(argv)
+    if args.device.lower() == "cpu" and not args.allow_cpu:
+        parser.error("CPU benchmarking requires --allow-cpu.")
     logging.basicConfig(level=logging.INFO)
     names = [name.strip() for name in args.models.split(",") if name.strip()]
-    run_comparison(names, limit=args.limit, out_dir=args.out_dir, device=args.device)
+    run_comparison(
+        names,
+        limit=args.limit,
+        out_dir=args.out_dir,
+        device=args.device,
+        allow_cpu=args.allow_cpu,
+    )
 
 
 if __name__ == "__main__":

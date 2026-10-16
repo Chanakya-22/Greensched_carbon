@@ -11,6 +11,7 @@
 
 ## Selection rule
 
+Benchmark device: CPU. Energy method: estimated_from_runtime (CodeCarbon PUE=1.0).
 Choose the model with the highest mean recall@5. Models within 0.01 (one percentage point) of the best recall are tied; among those, choose the lowest energy per 1,000 images.
 
 **Winner:** vit_b_16_siglip_webli

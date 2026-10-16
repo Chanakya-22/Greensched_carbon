@@ -86,7 +86,8 @@ components separately.
 
 ### Registered models
 
-- **ViT-B-32 OpenAI** (`vit_b_32_openai`): OpenAI-pretrained CLIP ViT-B/32.
+- **ViT-B-32 OpenAI** (`vit_b_32_openai`): OpenAI-pretrained CLIP ViT-B/32
+  using the QuickGELU architecture variant.
 - **ViT-B-32 LAION-2B** (`vit_b_32_laion2b`): LAION-2B-pretrained CLIP
   ViT-B/32.
 - **ViT-B-16-SigLIP WebLI** (`vit_b_16_siglip_webli`): SigLIP ViT-B/16
@@ -96,8 +97,9 @@ components separately.
 
 ### Selection rule and results
 
-The winner is the model with the highest mean recall@5. Models within one
-percentage point of the best score are treated as tied; among tied models,
+Benchmark device: CPU. Energy method: estimated_from_runtime (CodeCarbon
+PUE=1.0). The winner is the model with the highest mean recall@5. Models within
+one percentage point of the best score are treated as tied; among tied models,
 the one with the lowest energy per 1,000 images wins. The next eligible model
 is the runner-up. Results below come from the full 1,000-image retrieval run;
 the CSV contains all metrics, confidence-interval bounds, dataset identity,

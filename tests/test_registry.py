@@ -15,7 +15,7 @@ def test_requested_pretrained_pairs_are_available():
     pretrained = set(open_clip.list_pretrained())
     pairs = {(spec.arch, spec.pretrained) for spec in MODEL_SPECS}
     assert pairs == {
-        ("ViT-B-32", "openai"),
+        ("ViT-B-32-quickgelu", "openai"),
         ("ViT-B-32", "laion2b_s34b_b79k"),
         ("ViT-B-16-SigLIP", "webli"),
         ("convnext_base_w", "laion2b_s13b_b82k"),
@@ -87,3 +87,18 @@ def test_pretrained_model_produces_unit_norm_embeddings():
 
     torch.testing.assert_close(image_embedding.norm(dim=-1), torch.ones(1), atol=1e-5, rtol=1e-5)
     torch.testing.assert_close(text_embedding.norm(dim=-1), torch.ones(1), atol=1e-5, rtol=1e-5)
+
+
+@pytest.mark.slow
+def test_registry_models_do_not_warn_about_quickgelu_mismatch():
+    import warnings
+
+    for spec in MODEL_SPECS:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            EmbeddingModel.load(spec, device="cpu")
+        messages = [str(item.message) for item in caught]
+        assert not any("QuickGELU mismatch" in message for message in messages), (
+            spec,
+            messages,
+        )
