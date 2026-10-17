@@ -1,34 +1,43 @@
 {
+  "device": "cpu",
   "models": {
     "vit_b_32_openai": {
-      "avg_power_w": 139.93862645882487,
-      "img_per_s_at_batch_64": 75.7426881229756,
-      "kwh_per_1000_images": 0.0025158941097177564
+      "device": "cpu",
+      "energy_method": "estimated_from_runtime",
+      "avg_power_w": 143.84274479276007,
+      "img_per_s_at_batch_64": 75.2484197247084,
+      "kwh_per_1000_images": 0.002582444706007516
     },
     "vit_b_32_laion2b": {
-      "avg_power_w": 129.67576819813826,
-      "img_per_s_at_batch_64": 75.6438860772382,
-      "kwh_per_1000_images": 0.002407897883606876
+      "device": "cpu",
+      "energy_method": "estimated_from_runtime",
+      "avg_power_w": 128.21628583415028,
+      "img_per_s_at_batch_64": 81.89798582196718,
+      "kwh_per_1000_images": 0.0023575661606764207
     },
     "vit_b_16_siglip_webli": {
-      "avg_power_w": 130.50339846633355,
-      "img_per_s_at_batch_64": 19.161228595254713,
-      "kwh_per_1000_images": 0.005004345295829786
+      "device": "cpu",
+      "energy_method": "estimated_from_runtime",
+      "avg_power_w": 128.30181083648597,
+      "img_per_s_at_batch_64": 16.397340351390906,
+      "kwh_per_1000_images": 0.004982809193103661
     },
     "convnext_base_w_laion2b": {
-      "avg_power_w": 128.68134563271656,
-      "img_per_s_at_batch_64": 12.647247055918744,
-      "kwh_per_1000_images": 0.005703499423586372
+      "device": "cpu",
+      "energy_method": "estimated_from_runtime",
+      "avg_power_w": 127.47126703579585,
+      "img_per_s_at_batch_64": 9.700656901966292,
+      "kwh_per_1000_images": 0.006354055159705238
     }
   },
   "hardware": {
     "gpu_name": null,
     "driver_version": null,
     "cuda_version": null,
-    "torch_version": "2.13.0+cpu",
+    "torch_version": "2.14.1+cpu",
     "open_clip_version": "3.3.0",
     "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
     "os": "Windows-11-10.0.26300-SP0",
-    "timestamp": "2026-10-14T21:44:08.986451+00:00"
+    "timestamp": "2026-10-16T20:25:43.439464+00:00"
   }
 }

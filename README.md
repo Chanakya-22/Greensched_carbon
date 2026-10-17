@@ -200,3 +200,19 @@ and `docs/forecast_error.csv`.
 - [Slack sweep figure](docs/slack_sweep.png)
 - [Time-shifting ablation figure](docs/ablation_timeshift.png)
 - [Forecast-error sweep figure](docs/forecast_error.png)
+
+## Results: spot market sweeps
+
+The spot hazard and on-demand multiplier sweeps use the checked-in synthetic
+carbon and price traces, not real observed market or grid data. Their CSVs
+report cost and carbon changes against both an on-demand FIFO baseline and a
+spot FIFO baseline. At the default 2.5x on-demand multiplier, the nominal
+price discount for spot is `1 - 1 / 2.5 = 60%`; therefore, savings versus
+on-demand FIFO are mostly the spot discount, not scheduling intelligence.
+Changes versus spot FIFO compare against a FIFO policy using spot options only,
+so they isolate the scheduler's added value (subject to interruptions and
+workload outcomes).
+
+Run `python src/metrics/spot_experiments.py` to regenerate
+`docs/spot_hazard_sweep.csv`, `docs/spot_hazard_sweep.png`,
+`docs/spot_multiplier_sweep.csv`, and `docs/spot_multiplier_sweep.png`.

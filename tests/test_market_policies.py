@@ -7,6 +7,7 @@ from scheduler.policies import (
     market_cheapest,
     make_market_policy,
     ondemand_only_fifo,
+    spot_fifo,
     spot_only_joint_wait,
 )
 from simulator.simulator import Simulator
@@ -71,6 +72,19 @@ def test_zero_hazard_prefers_spot_unless_spot_is_excluded_by_buffer():
         "price_per_hr",
         "market",
     }
+
+
+def test_spot_fifo_uses_home_region_without_selecting_on_demand():
+    options = [
+        _candidate("region-cheap-dirty", "spot", 1.0),
+        _candidate("region-balanced", "spot", 2.0),
+        _candidate("region-balanced", "on_demand", 5.0),
+    ]
+
+    selected = spot_fifo(_job(), 0, options)
+
+    assert selected["region"] == "region-balanced"
+    assert selected["market"] == "spot"
 
 
 def test_simulator_passes_hazards_and_generates_both_market_candidates(tmp_path):
