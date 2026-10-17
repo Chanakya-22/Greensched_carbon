@@ -19,6 +19,7 @@ from scheduler.policies import (
     market_cheapest,
     market_joint,
     ondemand_only_fifo,
+    spot_fifo,
     spot_only_joint_wait,
 )
 from simulator.simulator import Simulator
@@ -26,6 +27,7 @@ from simulator.simulator import Simulator
 
 POLICIES = {
     "ondemand_only_fifo": ondemand_only_fifo,
+    "spot_fifo": spot_fifo,
     "spot_only_joint_wait": spot_only_joint_wait,
     "market_joint": market_joint,
     "market_cheapest": market_cheapest,
@@ -60,12 +62,18 @@ SUMMARY_COLUMNS = [
     "wasted_carbon_g_mean",
     "wasted_carbon_g_ci_low",
     "wasted_carbon_g_ci_high",
-    "cost_vs_fifo_pct_mean",
-    "cost_vs_fifo_pct_ci_low",
-    "cost_vs_fifo_pct_ci_high",
-    "carbon_vs_fifo_pct_mean",
-    "carbon_vs_fifo_pct_ci_low",
-    "carbon_vs_fifo_pct_ci_high",
+    "cost_vs_ondemand_fifo_pct_mean",
+    "cost_vs_ondemand_fifo_pct_ci_low",
+    "cost_vs_ondemand_fifo_pct_ci_high",
+    "carbon_vs_ondemand_fifo_pct_mean",
+    "carbon_vs_ondemand_fifo_pct_ci_low",
+    "carbon_vs_ondemand_fifo_pct_ci_high",
+    "cost_vs_spot_fifo_pct_mean",
+    "cost_vs_spot_fifo_pct_ci_low",
+    "cost_vs_spot_fifo_pct_ci_high",
+    "carbon_vs_spot_fifo_pct_mean",
+    "carbon_vs_spot_fifo_pct_ci_low",
+    "carbon_vs_spot_fifo_pct_ci_high",
 ]
 
 
@@ -127,8 +135,12 @@ def _aggregate_runs(
 ) -> pd.DataFrame:
     rows = []
     for parameter in parameter_values:
-        baseline_by_seed = {
+        ondemand_baseline_by_seed = {
             seed: run_metrics[(parameter, seed, "ondemand_only_fifo")]
+            for seed in seeds
+        }
+        spot_baseline_by_seed = {
+            seed: run_metrics[(parameter, seed, "spot_fifo")]
             for seed in seeds
         }
         for policy_name in POLICIES:
@@ -139,20 +151,6 @@ def _aggregate_runs(
                 ]
                 for metric in METRICS
             }
-            cost_vs_fifo = [
-                _percent_change(
-                    run_metrics[(parameter, seed, policy_name)]["cost"],
-                    baseline_by_seed[seed]["cost"],
-                )
-                for seed in seeds
-            ]
-            carbon_vs_fifo = [
-                _percent_change(
-                    run_metrics[(parameter, seed, policy_name)]["carbon_g"],
-                    baseline_by_seed[seed]["carbon_g"],
-                )
-                for seed in seeds
-            ]
             row = {
                 "parameter": parameter,
                 "policy": policy_name,
@@ -161,18 +159,33 @@ def _aggregate_runs(
             for metric, values in samples.items():
                 mean = float(np.mean(values))
                 low, high = _mean_t_interval(values)
+                if metric == "deadline_success_pct":
+                    low = max(0.0, low)
+                    high = min(100.0, high)
+                elif metric == "mean_interruptions":
+                    low = max(0.0, low)
                 row[f"{metric}_mean"] = mean
                 row[f"{metric}_ci_low"] = low
                 row[f"{metric}_ci_high"] = high
-            for metric_name, values in (
-                ("cost_vs_fifo_pct", cost_vs_fifo),
-                ("carbon_vs_fifo_pct", carbon_vs_fifo),
+            for baseline_name, baseline_by_seed in (
+                ("ondemand_fifo", ondemand_baseline_by_seed),
+                ("spot_fifo", spot_baseline_by_seed),
             ):
-                mean = float(np.mean(values))
-                low, high = _mean_t_interval(values)
-                row[f"{metric_name}_mean"] = mean
-                row[f"{metric_name}_ci_low"] = low
-                row[f"{metric_name}_ci_high"] = high
+                for metric in ("cost", "carbon_g"):
+                    values = [
+                        _percent_change(
+                            run_metrics[(parameter, seed, policy_name)][metric],
+                            baseline_by_seed[seed][metric],
+                        )
+                        for seed in seeds
+                    ]
+                    metric_stem = "carbon" if metric == "carbon_g" else metric
+                    metric_name = f"{metric_stem}_vs_{baseline_name}_pct"
+                    mean = float(np.mean(values))
+                    low, high = _mean_t_interval(values)
+                    row[f"{metric_name}_mean"] = mean
+                    row[f"{metric_name}_ci_low"] = low
+                    row[f"{metric_name}_ci_high"] = high
             rows.append(row)
     return pd.DataFrame(rows, columns=SUMMARY_COLUMNS)
 
@@ -184,10 +197,21 @@ def _plot_sweep(
     title: str,
 ) -> None:
     colors = plt.get_cmap("tab10").colors
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5.5))
+    fig, axes = plt.subplots(2, 3, figsize=(18, 9))
+    axes = list(axes.flat)
     plot_metrics = (
-        ("cost_vs_fifo_pct", "Cost vs FIFO (%)", "Change (%)"),
-        ("carbon_vs_fifo_pct", "Carbon vs FIFO (%)", "Change (%)"),
+        (
+            "cost_vs_ondemand_fifo_pct",
+            "Cost vs on-demand FIFO (%)",
+            "Change (%)",
+        ),
+        (
+            "carbon_vs_ondemand_fifo_pct",
+            "Carbon vs on-demand FIFO (%)",
+            "Change (%)",
+        ),
+        ("cost_vs_spot_fifo_pct", "Cost vs spot FIFO (%)", "Change (%)"),
+        ("carbon_vs_spot_fifo_pct", "Carbon vs spot FIFO (%)", "Change (%)"),
         ("deadline_success_pct", "Deadline success (%)", "Success (%)"),
     )
     for ax, (metric, heading, ylabel) in zip(axes, plot_metrics):
@@ -219,6 +243,7 @@ def _plot_sweep(
         ax.set_ylabel(ylabel)
         ax.grid(alpha=0.3)
 
+    axes[-1].set_visible(False)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(
         handles,

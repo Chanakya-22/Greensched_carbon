@@ -64,7 +64,11 @@ def test_energy_profile_output_structure_and_energy_values(monkeypatch):
     class FakeTracker:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
-            self.final_emissions_data = SimpleNamespace(energy_consumed=0.0002)
+            self.final_emissions_data = SimpleNamespace(
+                energy_consumed=0.0002,
+                pue=1.0,
+                energy_method="estimated_from_runtime",
+            )
             instances.append(self)
 
         def start(self):
@@ -84,15 +88,20 @@ def test_energy_profile_output_structure_and_energy_values(monkeypatch):
         "energy_kwh",
         "duration_s",
         "avg_power_w",
+        "pue",
+        "energy_method",
         "components_measured",
         "components_estimated",
     }
     assert results["energy_kwh"] == pytest.approx(0.0002)
     assert results["duration_s"] >= 0
     assert results["avg_power_w"] >= 0
+    assert results["pue"] == 1.0
+    assert results["energy_method"] == "estimated_from_runtime"
     assert results["components_measured"] == ["wall-clock duration"]
     assert "CPU energy" in results["components_estimated"]
     assert instances[0].kwargs["save_to_file"] is False
+    assert instances[0].kwargs["pue"] == 1.0
 
 
 def test_energy_profile_failure_logs_and_returns_nan(caplog, monkeypatch):

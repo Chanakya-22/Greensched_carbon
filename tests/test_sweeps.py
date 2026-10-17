@@ -84,7 +84,22 @@ def test_reduced_spot_experiments_write_expected_outputs(tmp_path):
     assert hazard_results.columns.tolist() == SPOT_SUMMARY_COLUMNS
     assert pd.read_csv(hazard_csv).columns.tolist() == SPOT_SUMMARY_COLUMNS
     assert hazard_results["parameter"].unique().tolist() == [0, 0.05]
-    assert hazard_results["policy"].nunique() == 4
+    assert hazard_results["policy"].nunique() == 5
+    assert hazard_results["deadline_success_pct_ci_low"].ge(0).all()
+    assert hazard_results["deadline_success_pct_ci_high"].le(100).all()
+    assert hazard_results["mean_interruptions_ci_low"].ge(0).all()
+    assert hazard_results["cost_vs_ondemand_fifo_pct_mean"].notna().all()
+    assert hazard_results["carbon_vs_ondemand_fifo_pct_mean"].notna().all()
+    assert hazard_results["cost_vs_spot_fifo_pct_mean"].notna().all()
+    assert hazard_results["carbon_vs_spot_fifo_pct_mean"].notna().all()
+    spot_fifo_rows = hazard_results[hazard_results["policy"].eq("spot_fifo")]
+    assert spot_fifo_rows["cost_vs_spot_fifo_pct_mean"].eq(0).all()
+    assert spot_fifo_rows["carbon_vs_spot_fifo_pct_mean"].eq(0).all()
+    ondemand_fifo_rows = hazard_results[
+        hazard_results["policy"].eq("ondemand_only_fifo")
+    ]
+    assert ondemand_fifo_rows["cost_vs_ondemand_fifo_pct_mean"].eq(0).all()
+    assert ondemand_fifo_rows["carbon_vs_ondemand_fifo_pct_mean"].eq(0).all()
 
     multiplier_csv = tmp_path / "spot-multiplier.csv"
     multiplier_png = tmp_path / "spot-multiplier.png"
@@ -102,4 +117,4 @@ def test_reduced_spot_experiments_write_expected_outputs(tmp_path):
     assert multiplier_results.columns.tolist() == SPOT_SUMMARY_COLUMNS
     assert pd.read_csv(multiplier_csv).columns.tolist() == SPOT_SUMMARY_COLUMNS
     assert multiplier_results["parameter"].unique().tolist() == [1.5, 2.5]
-    assert multiplier_results["policy"].nunique() == 4
+    assert multiplier_results["policy"].nunique() == 5

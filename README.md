@@ -86,7 +86,8 @@ components separately.
 
 ### Registered models
 
-- **ViT-B-32 OpenAI** (`vit_b_32_openai`): OpenAI-pretrained CLIP ViT-B/32.
+- **ViT-B-32 OpenAI** (`vit_b_32_openai`): OpenAI-pretrained CLIP ViT-B/32
+  using the QuickGELU architecture variant.
 - **ViT-B-32 LAION-2B** (`vit_b_32_laion2b`): LAION-2B-pretrained CLIP
   ViT-B/32.
 - **ViT-B-16-SigLIP WebLI** (`vit_b_16_siglip_webli`): SigLIP ViT-B/16
@@ -96,8 +97,9 @@ components separately.
 
 ### Selection rule and results
 
-The winner is the model with the highest mean recall@5. Models within one
-percentage point of the best score are treated as tied; among tied models,
+Benchmark device: CPU. Energy method: estimated_from_runtime (CodeCarbon
+PUE=1.0). The winner is the model with the highest mean recall@5. Models within
+one percentage point of the best score are treated as tied; among tied models,
 the one with the lowest energy per 1,000 images wins. The next eligible model
 is the runner-up. Results below come from the full 1,000-image retrieval run;
 the CSV contains all metrics, confidence-interval bounds, dataset identity,
@@ -198,3 +200,19 @@ and `docs/forecast_error.csv`.
 - [Slack sweep figure](docs/slack_sweep.png)
 - [Time-shifting ablation figure](docs/ablation_timeshift.png)
 - [Forecast-error sweep figure](docs/forecast_error.png)
+
+## Results: spot market sweeps
+
+The spot hazard and on-demand multiplier sweeps use the checked-in synthetic
+carbon and price traces, not real observed market or grid data. Their CSVs
+report cost and carbon changes against both an on-demand FIFO baseline and a
+spot FIFO baseline. At the default 2.5x on-demand multiplier, the nominal
+price discount for spot is `1 - 1 / 2.5 = 60%`; therefore, savings versus
+on-demand FIFO are mostly the spot discount, not scheduling intelligence.
+Changes versus spot FIFO compare against a FIFO policy using spot options only,
+so they isolate the scheduler's added value (subject to interruptions and
+workload outcomes).
+
+Run `python src/metrics/spot_experiments.py` to regenerate
+`docs/spot_hazard_sweep.csv`, `docs/spot_hazard_sweep.png`,
+`docs/spot_multiplier_sweep.csv`, and `docs/spot_multiplier_sweep.png`.

@@ -464,3 +464,15 @@ def ondemand_only_fifo(job, current_hour: int, region_options):
 
 
 ondemand_only_fifo.__name__ = "ondemand_only_fifo"
+
+
+def spot_fifo(job, current_hour: int, region_options):
+    """FIFO baseline restricted to spot choices, without scheduling intelligence."""
+    spot_options = [
+        option for option in region_options
+        if option.get("market", "spot") == "spot"
+    ]
+    return fifo_ondemand_policy(job, current_hour, spot_options)
+
+
+spot_fifo.__name__ = "spot_fifo"

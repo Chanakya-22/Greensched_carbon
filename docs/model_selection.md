@@ -4,10 +4,17 @@
 
 | Model | Mean recall@5 | Energy kWh / 1,000 images | Error |
 | --- | --- | --- | --- |
-| vit_b_32_openai | 0.886400 | 0.002516 |  |
-| vit_b_32_laion2b | 0.922700 | 0.002408 |  |
-| vit_b_16_siglip_webli | 0.951500 | 0.005004 |  |
-| convnext_base_w_laion2b | 0.947500 | 0.005703 |  |
+| vit_b_32_openai | 0.892000 | 0.002582 |  |
+| vit_b_32_laion2b | 0.922700 | 0.002358 |  |
+| vit_b_16_siglip_webli | 0.951500 | 0.004983 |  |
+| convnext_base_w_laion2b | 0.947500 | 0.006354 |  |
+
+## Run conditions
+
+- Device: cpu
+- Dataset: nlphuji/flickr_1k_test_image_text_retrieval (images: 1000)
+- Energy method: estimated_from_runtime (PUE: 1.0)
+- Energy is estimated from wall-clock runtime, not read from a power sensor; treat it as a runtime proxy.
 
 ## Selection rule
 

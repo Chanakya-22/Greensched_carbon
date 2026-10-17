@@ -85,6 +85,8 @@ def test_multi_model_runner_writes_outputs_and_continues_after_model_error(
                 "energy_kwh": 0.0003,
                 "duration_s": 1.5,
                 "avg_power_w": 0.72,
+                "pue": 1.0,
+                "energy_method": "estimated_from_runtime",
                 "components_measured": ["wall-clock duration"],
                 "components_estimated": ["CPU energy"],
             },
@@ -117,15 +119,19 @@ def test_multi_model_runner_writes_outputs_and_continues_after_model_error(
         dataset=_fake_dataset(),
         model_loader=load_model,
         profile_path=profile_path,
+        device="cpu",
+        allow_cpu=True,
     )
 
     assert frame["model"].tolist() == ["fake-good", "fake-broken", "fake-good-2"]
+    assert frame["device"].tolist() == ["cpu", "cpu", "cpu"]
     assert frame.loc[0, "mean_recall_at_5"] == 1.0
     assert frame.loc[1, "error"] == "RuntimeError: injected model failure"
     assert frame.loc[2, "mean_recall_at_5"] == 1.0
     assert frame.loc[0, "parameter_count"] == 17
     assert frame.loc[0, "embedding_dim"] == 3
     assert frame.loc[0, "images_per_s_b64"] == 1000 / 64
+    assert frame.loc[0, "energy_method"] == "estimated_from_runtime"
 
     csv_path = out_dir / benchmark.CSV_NAME
     assert csv_path.exists()
@@ -134,19 +140,32 @@ def test_multi_model_runner_writes_outputs_and_continues_after_model_error(
     assert len(records) == 3
     assert records[1]["error"] == "RuntimeError: injected model failure"
     assert records[0]["dataset"] == "synthetic benchmark fixture"
+    assert records[0]["device"] == "cpu"
+    assert records[0]["energy_method"] == "estimated_from_runtime"
     assert records[0]["n_images"] == "3"
     assert (out_dir / benchmark.COMPARISON_PLOT_NAME).exists()
     assert (out_dir / benchmark.PARETO_PLOT_NAME).exists()
     assert (out_dir / benchmark.SELECTION_NAME).exists()
 
     profiles = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert profiles["device"] == "cpu"
     assert profiles["models"]["fake-good"]["avg_power_w"] == 0.72
+    assert profiles["models"]["fake-good"]["device"] == "cpu"
+    assert (
+        profiles["models"]["fake-good"]["energy_method"]
+        == "estimated_from_runtime"
+    )
     assert profiles["models"]["fake-good"]["img_per_s_at_batch_64"] == 1000 / 64
     assert profiles["hardware"]["gpu_name"] is None
     selection = (out_dir / benchmark.SELECTION_NAME).read_text(encoding="utf-8")
     assert "**Winner:** fake-good" in selection
     assert "**Runner-up:** fake-good-2" in selection
+    assert "- Device: cpu" in selection
+    assert "- Dataset: synthetic benchmark fixture (images: 3)" in selection
+    assert "- Energy method: estimated_from_runtime (PUE: 1.0)" in selection
+    assert "runtime proxy" in selection
 
     console = capsys.readouterr().out
     assert "Failed fake-broken: RuntimeError: injected model failure" in console
     assert "Completed fake-good-2" in console
+    assert "GPU fields are empty" in console
